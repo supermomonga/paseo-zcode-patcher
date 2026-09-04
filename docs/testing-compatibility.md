@@ -145,7 +145,7 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 ## 7. 2026-09-05 実施結果
 
 - patcher test: 19件中18件成功、インストール済みZCodeを使う1件は通常実行ではskip。`RUN_ZCODE_RUNTIME_TEST=1`では同テストも成功。
-- overlay test: 10 file、89件成功。
+- overlay test: 10 file、91件成功。
 - protocol/serverの型検査とbuild、overlay entry importに成功。
 - 18 entryのoverlayを同一入力からbyte-for-byteで再生成し、manifestのhashと一致。
 - 実機providerでcatalog、短いprompt、stream、usage、session list、resume、history、cancel後のcleanupを確認。
@@ -157,6 +157,8 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 - 実画面でZCodeが「利用可能・4つのモデル」と表示され、model pickerにも4 modelが現れることを確認。
 - ZCodeの`plan` modeでMarkdown、Approve、Dismissが既存`PlanCard`に表示されることを画面で確認し、画像を記録した。Dismiss後にworkspace変更と残存processがないことを確認。
 - todoをplanとは別のtimeline eventとして`TodoListCard`へ渡すことはfocused testで確認。renderer差分はない。
+- ZCode 3.11.2のworkspace stateが`thoughtLevel.current`なしで`defaultLevel`を返す実機contractを確認し、Thinking選択肢がmodel catalogから消える問題を修正。workspace既定値の採用と不正な既定値の拒否をfocused testで確認。
+- 修正版アプリでThinkingの既定値`Max`、選択肢`Low` / `High` / `Max`を確認。`High`を指定して開始したsessionが正常応答し、composerでも`High`を保持することを確認。
 
 ## 8. Release判定
 

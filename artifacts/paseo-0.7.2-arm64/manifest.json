@@ -6,7 +6,7 @@
     "platform": "darwin",
     "arch": "arm64",
     "sourceAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-    "patchedAsarSha256": "c3ae45ec6850146905e27bd897504acdceb4463bdecc293adab7f36eaeec182e"
+    "patchedAsarSha256": "b95c48408cbcd689cd5a561dabdf19a8a6adccbd60812b4cb2f8f93f16c86185"
   },
   "zcode": {
     "appVersion": "3.11.2",
@@ -25,7 +25,7 @@
   },
   "patchFormat": "header-preserving-append-v1",
   "markerPath": "paseo-zcode-patcher.json",
-  "overlayHash": "b36053467b49dc2765680386f7754b2e8889e0df982baa2bf3dc1f3961b7c38a",
+  "overlayHash": "59765bd5a4c6a3272b179ee3a3c6977ab6a98230a941ad0d4e01d0c2f1c72e18",
   "entries": [
     {
       "path": "node_modules/@getpaseo/protocol/dist/provider-config.js",
@@ -108,7 +108,7 @@
     {
       "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/mapping.js",
       "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/mapping.js",
-      "sha256": "4aba49459336d8897cb00934eaa4bc426fa72b3903bb484f86065ae02612c02c",
+      "sha256": "56fdc094e2d00925bfd6afef2656b49df70a933ccc01da1626d8f032574cb0e7",
       "originalSha256": null
     },
     {
@@ -126,7 +126,7 @@
     {
       "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/host-schemas.js",
       "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/host-schemas.js",
-      "sha256": "c02f1c126db7faafbb519149132dc1ea07dc32d4e581fc51c5e0930b1ed1d894",
+      "sha256": "166aa90559f0d9ffd79d052d461e9b5a06ac57781a2e71e5826f7b793e1aff98",
       "originalSha256": null
     },
     {

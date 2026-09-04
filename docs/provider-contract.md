@@ -71,7 +71,7 @@ labelはZCode GUIと同じく`modelId`、descriptionは`providerLabel`を使用�
 
 ### Thinking option
 
-`thoughtLevel.enabled`かつcurrentとavailableが存在する場合だけ、Paseoの`thinkingOptions`へ写像する。`setThinkingOption`は`setThoughtLevel`へ変換し、未知IDを拒否する。
+ZCode 3.11.2はworkspace stateでは`thoughtLevel.current`を返さず、`defaultLevel`と`available`を返す。session snapshotでは`current`も返る。`thoughtLevel.enabled`かつavailableが存在する場合、`current ?? defaultLevel`を既定値としてPaseoの`thinkingOptions`へ写像する。既定値がない、またはavailableに含まれない場合はcatalogを拒否する。`setThinkingOption`は`setThoughtLevel`へ変換し、未知IDを拒否する。
 
 ### Mode
 

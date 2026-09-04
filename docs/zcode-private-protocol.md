@@ -112,7 +112,7 @@ subscriptionは`onDynamicSessionEvent`だけを使用し、内部bridgeでは専
 ### Settings
 
 - model: current `ModelRef`とavailable model options
-- thought level: enabled、current、available options
+- thought level: enabled、workspace既定値`defaultLevel`、session現在値`current`、available options
 - mode: current string
 
 未知mode、invalid model ref、duplicate model IDを拒否する。

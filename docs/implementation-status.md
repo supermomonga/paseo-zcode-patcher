@@ -26,8 +26,8 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | --- | --- |
 | package | `paseo-zcode-patcher@0.1.0`、`private: true` |
 | overlay entry 数 | 18 |
-| overlay SHA-256 | `b36053467b49dc2765680386f7754b2e8889e0df982baa2bf3dc1f3961b7c38a` |
-| 生成後 `app.asar` SHA-256 | `c3ae45ec6850146905e27bd897504acdceb4463bdecc293adab7f36eaeec182e` |
+| overlay SHA-256 | `59765bd5a4c6a3272b179ee3a3c6977ab6a98230a941ad0d4e01d0c2f1c72e18` |
+| 生成後 `app.asar` SHA-256 | `b95c48408cbcd689cd5a561dabdf19a8a6adccbd60812b4cb2f8f93f16c86185` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -51,7 +51,7 @@ overlay は固定 Paseo source archive から独立に再生成して同じ hash
 その後、次を実機で確認した。
 
 - `node dist/src/cli.js patch` が固定出力 `/Applications/PaseoZCode.app` を生成した。
-- 出力 ASAR は manifest の SHA-256 `c3ae45ec6850146905e27bd897504acdceb4463bdecc293adab7f36eaeec182e` と一致した。
+- 出力 ASAR は manifest の SHA-256 `b95c48408cbcd689cd5a561dabdf19a8a6adccbd60812b4cb2f8f93f16c86185` と一致した。
 - 元 Paseo ASAR は SHA-256 `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` のままである。
 - `codesign --verify --deep --strict --verbose=2` が成功した。
 - 異なる `PASEO_HOME` と Electron user-data directory を使う cold start を 3 回行い、各回で画面と daemon の起動、終了時の lifecycle RPC による正常停止を確認した。
@@ -59,6 +59,14 @@ overlay は固定 Paseo source archive から独立に再生成して同じ hash
 - ZCode の `plan` mode で Markdown 全体、`Approve`、`Dismiss` が既存 `PlanCard` に表示された。確認セッションは Dismiss し、workspace を変更しなかった。
 - todo は plan とは別の timeline event のまま `TodoListCard` へ渡されることを focused test で確認した。renderer は変更していない。
 - 終了後に PaseoZCode、ZCode host、ZCode Helper の残存プロセスがないことを確認した。
+
+### Thinking選択欄の修正
+
+実機調査で、ZCode 3.11.2のworkspace stateはThinkingについて`enabled: true`、`available: low/high/max`、`defaultLevel: max`を返す一方、session作成前は`current`を返さないことを確認した。旧mapperは`current`がない場合にThinking options全体を省略していたため、Paseo composerに選択欄が表示されなかった。
+
+protocol schemaへ`defaultLevel`を追加し、model catalogではsessionの`current`を優先し、存在しないworkspace stateでは`defaultLevel`を採用するよう修正した。enabledなcatalogの既定値が欠落するかavailable外の場合は、選択欄を黙って消さずprotocol errorとして拒否する。
+
+修正版アプリの新規workspace画面で既定値`Max`と`Low` / `High` / `Max`の選択肢を確認し、`High`へ変更して開始したsessionでも`High`が保持されることを実機で確認した。
 
 ## 配布上の制約
 

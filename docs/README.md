@@ -40,6 +40,6 @@
 | `paseo-acp-patcher`参照commit | `6c5c824e6eaa581f90cb1e809e1a59d61d2740f4` |
 | `zcode-acp`参照commit | `7b3af187d7ee732e9043aed873a863fc855625c2` |
 
-生成済み overlay は 18 entry で、overlay SHA-256 は `b36053467b49dc2765680386f7754b2e8889e0df982baa2bf3dc1f3961b7c38a`、生成後 ASAR SHA-256 は `c3ae45ec6850146905e27bd897504acdceb4463bdecc293adab7f36eaeec182e` である。entry ごとの hash は `artifacts/paseo-0.7.2-arm64/manifest.json` を正とする。
+生成済み overlay は 18 entry で、overlay SHA-256 は `59765bd5a4c6a3272b179ee3a3c6977ab6a98230a941ad0d4e01d0c2f1c72e18`、生成後 ASAR SHA-256 は `b95c48408cbcd689cd5a561dabdf19a8a6adccbd60812b4cb2f8f93f16c86185` である。entry ごとの hash は `artifacts/paseo-0.7.2-arm64/manifest.json` を正とする。
 
 provider と `/Applications/PaseoZCode.app` の実機検証は完了している。生成 hash、strict 署名、3 回の独立 cold start、ZCode の利用可能表示、PlanCard の画面確認結果は [Implementation status](implementation-status.md) に記録する。

@@ -79,7 +79,7 @@ providerは同じnative requestに含まれる`input.plan`、request ID、option
 - provider IDは`zcode`、labelは`ZCode`とする。
 - `/Applications/ZCode.app`の検出、compatibility gate、軽量runtime smokeが成功した場合だけavailableにする。
 - model IDは`[providerId, modelId, variant|null]`のJSON文字列とし、native参照へ可逆に戻す。
-- thinking optionsはZCodeの`thoughtLevel.available`から生成する。
+- thinking optionsはZCodeの`thoughtLevel.available`から生成し、sessionの`current`またはworkspaceの`defaultLevel`を既定値にする。
 - modeの現在値と選択肢をPaseoへ公開し、ZCodeが未知modeを返した場合は失敗させる。
 
 ### FR-2: Session lifecycle
