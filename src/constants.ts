@@ -8,6 +8,10 @@ export const ASAR_RELATIVE_PATH = "Contents/Resources/app.asar";
 export const ARTIFACT_ID = "paseo-0.7.2-arm64";
 export const PATCH_FORMAT = "header-preserving-append-v1";
 export const MARKER_PATH = "paseo-zcode-patcher.json";
+export const TARGET_PASEO_RENDERER_RESOURCE =
+  "app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js";
+export const TARGET_PASEO_RENDERER_SHA256 =
+  "e0bf84a5218b90f1575ead487f4cce8d20f06027eb76df1a9efdef9283c2cdc8";
 export const ZCODE_REFERENCE_COMMIT =
   "7b3af187d7ee732e9043aed873a863fc855625c2";
 export const TARGET_ZCODE_APP_VERSION = "3.11.2";

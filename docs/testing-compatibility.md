@@ -15,6 +15,7 @@
 - Paseo/ZCode関連process検出
 - 固定出力とsymlinkの削除制約
 - fixture ASARのpacked data、metadata、欠落unpacked entry保持
+- renderer resourceの元hash検証、固定file置換、置換後hash検証
 - marker、integrity block、overlay、生成hashの決定性
 - 未対応ASAR、未知entry、容量不足、中断時cleanup
 - bundle/xattr比較と署名command construction
@@ -26,7 +27,8 @@
 - `zcode`がbuilt-in definition、factory、contractへ一度だけ登録される
 - 既存provider definitions/factories/contractsが変わらない
 - mode visualsと`yolo.isUnattended`が一致する
-- renderer sourceとrenderer build artifactがoverlayに含まれない
+- `zcode`が既存`glm-acp-agent` catalog icon IDへ解決される
+- renderer buildではmain bundleだけがresource overlayに含まれ、新しい画像assetが含まれない
 
 ### Runtime discovery
 
@@ -94,12 +96,13 @@
 
 1. source patchをwhitespace errorなしで適用
 2. frozen dependency install
-3. protocol/provider registry/schema focused tests
+3. protocol/provider registry/schema/provider icon focused tests
 4. ZCode provider/discovery/bridge/session/mapper tests
 5. protocol/server typecheckとbuild
-6. overlay entry import smoke
-7. manifest/marker/hash生成
-8. 同じ入力で二回生成し、byte-for-byte一致を確認
+6. Electron向けrenderer exportとmain bundle以外の同一性検証
+7. overlay entry import smoke
+8. manifest/marker/hash生成
+9. 同じ入力で二回生成し、byte-for-byte一致を確認
 
 ## 5. 実機検証
 
@@ -116,6 +119,7 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 ### Agent flow
 
 - model catalogとthinking level
+- model pickerとcomposerでZCodeがGLM Agentと同じiconを表示
 - `build`、`edit`、`plan`、`yolo`の切替
 - session create、prompt、複数stream chunk、reasoning、usage
 - read-only toolとwrite tool、allow/deny
@@ -131,7 +135,7 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 4. todoが存在する場合、別の`TodoListCard`として表示されることを確認する。
 5. Dismissし、workspaceが変更されずnative deny/declineが返ることを確認する。
 6. 再度planを作成してApproveし、同じnative turnが実装へ進むことを確認する。
-7. `permission-plan-card` test IDが使用され、renderer差分がないことを確認する。
+7. `permission-plan-card` test IDが使用され、interaction表示のrenderer差分がないことを確認する。
 
 ## 6. Negative runtime tests
 
@@ -145,23 +149,25 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 
 ## 7. 2026-09-05 実施結果
 
-- patcher test: 19件中18件成功、インストール済みZCodeを使う1件は通常実行ではskip。`RUN_ZCODE_RUNTIME_TEST=1`では同テストも成功。
-- overlay test: 10 file、92件成功。
-- protocol/serverの型検査とbuild、overlay entry importに成功。
-- 18 entryのoverlayを同一入力からbyte-for-byteで再生成し、manifestのhashと一致。
+- patcher test: 21件中20件成功、インストール済みZCodeを使う1件は通常実行ではskip。`RUN_ZCODE_RUNTIME_TEST=1`では同テストも成功。
+- overlay test: 11 file、100件成功。入力なし子ツールの成功・失敗と履歴同期の回帰testを含む。
+- protocol/serverの型検査とbuild、renderer export、overlay entry importに成功。
+- ASAR 18 entryとrenderer resource 1 entryのoverlayを同じ入力から2回生成し、overlay/ASAR/resourceのhashが一致。
 - 実機providerでcatalog、短いprompt、stream、usage、session list、resume、history、cancel後のcleanupを確認。
 - Plan Dismissでworkspace不変、Plan Approveで同じturnから実装へ進むことを確認。
-- renderer、ACP route、外部`zcode-acp`実行経路がsource patchとoverlayに含まれないことを確認。
+- ZCode icon IDの対応付け以外のrenderer変更、ACP route、外部`zcode-acp`実行経路がsource patchとoverlayに含まれないことを確認。
 - patcher packageの`npm audit`は0件。固定Paseo 0.7.2 sourceの`npm ci`は上流依存に101件（low 8、moderate 44、high 42、critical 7）を報告。
 - 許可された旧`zcode-acp`由来のZCode Helperを終了後、`/Applications/PaseoZCode.app`の生成に成功。生成ASARとmanifestのhash一致、元Paseo ASAR不変、strict署名を確認。
 - 異なる`PASEO_HOME`とElectron user-data directoryで3回cold startし、毎回daemonがrunningになり、終了時にlifecycle RPCで正常停止した。
 - 実画面でZCodeが「利用可能・4つのモデル」と表示され、model pickerにも4 modelが現れることを確認。
 - ZCodeの`plan` modeでMarkdown、Approve、Dismissが既存`PlanCard`に表示されることを画面で確認し、画像を記録した。Dismiss後にworkspace変更と残存processがないことを確認。
-- todoをplanとは別のtimeline eventとして`TodoListCard`へ渡すことはfocused testで確認。renderer差分はない。
+- todoをplanとは別のtimeline eventとして`TodoListCard`へ渡すことはfocused testで確認。interaction表示のrenderer差分はない。
 - ZCode 3.11.2のworkspace stateが`thoughtLevel.current`なしで`defaultLevel`を返す実機contractを確認し、Thinking選択肢がmodel catalogから消える問題を修正。workspace既定値の採用と不正な既定値の拒否をfocused testで確認。
 - composerから渡された`clientMessageId`をZCode providerのuser message通知へ引き継ぐことをfocused testで確認。Paseoの既存照合処理により送信済み発言が二重登録されず、IDなしの独立したuser messageを誤って除外しない。
 - 修正版アプリの新規sessionで一意なpromptを送信し、user messageの吹き出しが1件だけ表示され、ZCodeの応答が正常に完了することを実画面で確認。
 - 修正版アプリでThinkingの既定値`Max`、選択肢`Low` / `High` / `Max`を確認。`High`を指定して開始したsessionが正常応答し、composerでも`High`を保持することを確認。
+- icon修正版アプリのmodel pickerでZCode providerと4 modelにGLM Agentと同じZ.ai iconが表示され、ZCode model選択後のcomposerにも同じiconが表示されることを確認。
+- `npm pack --dry-run`でmanifestが参照するASAR 18 entryとrenderer resource 1 entryがpackageへ含まれることを確認。
 
 ## 8. Release判定
 
@@ -181,8 +187,8 @@ release可能なのは次をすべて満たす場合だけである。
 
 1. source commitと公式ASARを特定する。
 2. provider protocol/types/UI contractに変更がないか確認する。
-3. source patchを新commitへ移植し、renderer無変更を再確認する。
-4. overlay/manifest/hashを置換する。
+3. source patchを新commitへ移植し、ZCode icon mapping以外のrenderer差分がないことを再確認する。
+4. 元renderer bundle path/hashを含むoverlay/manifest/hashを置換する。
 5. 全testと実機検証を完走する。
 6. 旧Paseo entry、fixture、support記述を削除する。
 

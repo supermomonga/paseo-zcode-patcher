@@ -6,7 +6,7 @@
     "platform": "darwin",
     "arch": "arm64",
     "sourceAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-    "patchedAsarSha256": "6c3531db45cb75e9c2efd9748527c8cdb462ab13c10c8e5455e430ac369242c8"
+    "patchedAsarSha256": "48ebc26679c0af07ba68f94b1a573f58475af5abfcf9f545f60d6001b1a38f78"
   },
   "zcode": {
     "appVersion": "3.11.2",
@@ -25,7 +25,7 @@
   },
   "patchFormat": "header-preserving-append-v1",
   "markerPath": "paseo-zcode-patcher.json",
-  "overlayHash": "af28209c4bbb26c4bab2901feb2cb52d28e82dc3327f2b22d204005f5fdce5d4",
+  "overlayHash": "c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03",
   "entries": [
     {
       "path": "node_modules/@getpaseo/protocol/dist/provider-config.js",
@@ -134,6 +134,14 @@
       "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/schemas.js",
       "sha256": "504fbb9ea9cd8b7c70f638175b49839877caa29fc5a45cbd804d944680f08f14",
       "originalSha256": null
+    }
+  ],
+  "resourceEntries": [
+    {
+      "path": "app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
+      "source": "resources/app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
+      "sha256": "067e03e488a5fcee5657f21da99e301c9eb31e5e6f0687481cd776c623690f77",
+      "originalSha256": "e0bf84a5218b90f1575ead487f4cce8d20f06027eb76df1a9efdef9283c2cdc8"
     }
   ]
 }

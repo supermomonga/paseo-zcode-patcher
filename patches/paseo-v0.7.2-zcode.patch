@@ -1,3 +1,23 @@
+diff --git a/packages/app/src/components/provider-icon-name.test.ts b/packages/app/src/components/provider-icon-name.test.ts
+index fabfbd25e49cacf167b2141fd2aaf27cc596312c..59d14f87f79b14a6fe3a2f5c378868a049713fcf 100644
+--- a/packages/app/src/components/provider-icon-name.test.ts
++++ b/packages/app/src/components/provider-icon-name.test.ts
+@@ -10,0 +11,7 @@ describe("resolveProviderIconName", () => {
++  it("reuses the GLM Agent catalog icon for ZCode", () => {
++    expect(resolveProviderIconName("zcode")).toEqual({
++      kind: "catalog",
++      id: "glm-acp-agent",
++    });
++  });
++
+diff --git a/packages/app/src/components/provider-icon-name.ts b/packages/app/src/components/provider-icon-name.ts
+index 02cd2ec87446b336450a1abc675ee4a17ff6a617..8a1c7677d47a988220663b4c1c3869fc3f6938c2 100644
+--- a/packages/app/src/components/provider-icon-name.ts
++++ b/packages/app/src/components/provider-icon-name.ts
+@@ -14,0 +15,3 @@ export function resolveProviderIconName(provider: string): ProviderIconName {
++  if (provider === "zcode") {
++    return { kind: "catalog", id: "glm-acp-agent" };
++  }
 diff --git a/packages/protocol/src/provider-config.ts b/packages/protocol/src/provider-config.ts
 index 2ab879c31ff4f3578d0050d66d8fe49b20adfb6d..65b43b277e3cabb0f41ba340b0833ca688f64e60 100644
 --- a/packages/protocol/src/provider-config.ts

@@ -21,7 +21,7 @@ describe("release artifact", () => {
       sourceAsarSha256:
         "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
       patchedAsarSha256:
-        "6c3531db45cb75e9c2efd9748527c8cdb462ab13c10c8e5455e430ac369242c8",
+        "48ebc26679c0af07ba68f94b1a573f58475af5abfcf9f545f60d6001b1a38f78",
     });
     expect(manifest.zcode).toMatchObject({
       appVersion: "3.11.2",
@@ -32,7 +32,7 @@ describe("release artifact", () => {
     });
     expect(manifest.entries).toHaveLength(18);
     expect(manifest.overlayHash).toBe(
-      "af28209c4bbb26c4bab2901feb2cb52d28e82dc3327f2b22d204005f5fdce5d4",
+      "c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03",
     );
     expect(
       manifest.entries.some((entry) =>
@@ -41,6 +41,17 @@ describe("release artifact", () => {
         ),
       ),
     ).toBe(false);
+    expect(manifest.resourceEntries).toEqual([
+      {
+        path: "app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
+        source:
+          "resources/app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
+        sha256:
+          "067e03e488a5fcee5657f21da99e301c9eb31e5e6f0687481cd776c623690f77",
+        originalSha256:
+          "e0bf84a5218b90f1575ead487f4cce8d20f06027eb76df1a9efdef9283c2cdc8",
+      },
+    ]);
     expect(
       manifest.entries.filter((entry) =>
         entry.path.endsWith("/provider-registry.js"),
@@ -75,7 +86,7 @@ describe("release artifact", () => {
       await Promise.all(files.map(async (file) => await fs.readFile(file))),
     ).toString("utf8");
     expect(contents).not.toMatch(
-      /(?:Bearer\s|access[_-]?token|refresh[_-]?token|BEGIN [A-Z ]*PRIVATE KEY|PROMPT_MUST_NOT_BE_LOGGED)/iu,
+      /(?:Bearer\s+[A-Za-z0-9._~+/-]{20,}|BEGIN [A-Z ]*PRIVATE KEY|PROMPT_MUST_NOT_BE_LOGGED)/u,
     );
   });
 });

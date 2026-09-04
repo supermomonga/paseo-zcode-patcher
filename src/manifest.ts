@@ -7,6 +7,8 @@ import {
   PATCHER_VERSION,
   PATCH_FORMAT,
   TARGET_PASEO_COMMIT,
+  TARGET_PASEO_RENDERER_RESOURCE,
+  TARGET_PASEO_RENDERER_SHA256,
   TARGET_PASEO_VERSION,
   TARGET_ZCODE_APP_VERSION,
   TARGET_ZCODE_CLI_SHA256,
@@ -18,7 +20,7 @@ import {
   TARGET_ZCODE_RPC_SHA256,
   ZCODE_REFERENCE_COMMIT,
 } from "./constants.js";
-import { computeOverlayHash, sha256File } from "./hashes.js";
+import { computePatchOverlayHash, sha256File } from "./hashes.js";
 
 export interface OverlayEntry {
   path: string;
@@ -52,6 +54,7 @@ export interface PatchManifest {
   markerPath: string;
   overlayHash: string;
   entries: OverlayEntry[];
+  resourceEntries: OverlayEntry[];
 }
 
 function assertRecord(
@@ -97,45 +100,73 @@ export async function loadManifest(
     parsed.patchFormat !== PATCH_FORMAT ||
     parsed.markerPath !== MARKER_PATH ||
     !isSha256(parsed.overlayHash) ||
-    !Array.isArray(parsed.entries)
+    !Array.isArray(parsed.entries) ||
+    !Array.isArray(parsed.resourceEntries)
   ) {
     throw new Error("unsupported or malformed patch manifest");
   }
 
-  const entries: OverlayEntry[] = parsed.entries.map((entry, index) => {
-    assertRecord(entry, `manifest.entries[${index}]`);
-    if (
-      typeof entry.path !== "string" ||
-      entry.path.startsWith("/") ||
-      entry.path
-        .split("/")
-        .some((part) => part === "" || part === "." || part === "..") ||
-      typeof entry.source !== "string" ||
-      path.isAbsolute(entry.source) ||
-      entry.source
-        .split(/[\\/]/u)
-        .some((part) => part === "" || part === "." || part === "..") ||
-      !isSha256(entry.sha256) ||
-      (entry.originalSha256 !== null && !isSha256(entry.originalSha256))
-    ) {
-      throw new Error(`manifest.entries[${index}] is malformed`);
-    }
-    return entry as unknown as OverlayEntry;
-  });
+  const parseEntries = (value: unknown[], label: string): OverlayEntry[] =>
+    value.map((entry, index) => {
+      assertRecord(entry, `${label}[${index}]`);
+      if (
+        typeof entry.path !== "string" ||
+        entry.path.startsWith("/") ||
+        entry.path
+          .split("/")
+          .some((part) => part === "" || part === "." || part === "..") ||
+        typeof entry.source !== "string" ||
+        path.isAbsolute(entry.source) ||
+        entry.source
+          .split(/[\\/]/u)
+          .some((part) => part === "" || part === "." || part === "..") ||
+        !isSha256(entry.sha256) ||
+        (entry.originalSha256 !== null && !isSha256(entry.originalSha256))
+      ) {
+        throw new Error(`${label}[${index}] is malformed`);
+      }
+      return entry as unknown as OverlayEntry;
+    });
+  const entries = parseEntries(parsed.entries, "manifest.entries");
+  const resourceEntries = parseEntries(
+    parsed.resourceEntries,
+    "manifest.resourceEntries",
+  );
   if (new Set(entries.map((entry) => entry.path)).size !== entries.length) {
     throw new Error("manifest contains duplicate ASAR entry paths");
   }
-  for (const entry of entries) {
+  if (
+    new Set(resourceEntries.map((entry) => entry.path)).size !==
+    resourceEntries.length
+  ) {
+    throw new Error("manifest contains duplicate resource entry paths");
+  }
+  if (
+    resourceEntries.length !== 1 ||
+    resourceEntries[0]?.path !== TARGET_PASEO_RENDERER_RESOURCE ||
+    resourceEntries[0].originalSha256 !== TARGET_PASEO_RENDERER_SHA256
+  ) {
+    throw new Error(
+      "manifest resource entries do not match the fixed artifact",
+    );
+  }
+  for (const entry of [...entries, ...resourceEntries]) {
     const actual = await sha256File(
       path.join(artifactDirectory, "overlay", entry.source),
     );
     if (actual !== entry.sha256)
       throw new Error(`overlay hash mismatch for '${entry.path}'`);
   }
-  if (computeOverlayHash(entries) !== parsed.overlayHash) {
+  if (
+    computePatchOverlayHash(entries, resourceEntries) !== parsed.overlayHash
+  ) {
     throw new Error("overlay aggregate hash mismatch");
   }
-  return { ...(parsed as unknown as PatchManifest), entries };
+  return {
+    ...(parsed as unknown as PatchManifest),
+    entries,
+    resourceEntries,
+  };
 }
 
 export function markerContents(manifest: PatchManifest): Buffer {

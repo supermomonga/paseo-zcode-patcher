@@ -58,7 +58,7 @@ Repository: Paseo source checkout
 - `packages/app/src/agent-stream/view.tsx`
 - `packages/app/src/components/question-form-card.tsx`
 
-このcommitでは`AgentPermissionRequest.kind === "plan"`と`metadata.planText`または`input.plan`を既存`PlanCard`へ表示できる。`kind === "question"`と`input.questions`は既存`QuestionFormCard`を使い、`AgentTimelineItem.type === "todo"`は既存`TodoListCard`を使う。この既存contractを利用し、renderer差分を作らない。
+このcommitでは`AgentPermissionRequest.kind === "plan"`と`metadata.planText`または`input.plan`を既存`PlanCard`へ表示できる。`kind === "question"`と`input.questions`は既存`QuestionFormCard`を使い、`AgentTimelineItem.type === "todo"`は既存`TodoListCard`を使う。この既存contractを利用し、interaction表示のrenderer差分を作らない。provider iconについてだけ、既存GLM Agent catalog iconへの対応付けを追加する。
 
 ## 4. Version evidence
 

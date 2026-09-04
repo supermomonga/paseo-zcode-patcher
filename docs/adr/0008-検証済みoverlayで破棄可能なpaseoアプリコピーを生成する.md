@@ -10,6 +10,8 @@ links:
   kind: relatesto
 - target: 10
   kind: relatesto
+- target: 11
+  kind: amendedby
 ---
 
 # 検証済みoverlayで破棄可能なPaseoアプリコピーを生成する

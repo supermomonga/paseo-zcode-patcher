@@ -6,7 +6,7 @@
 
 ## 1. 目的
 
-`paseo-zcode-patcher`は、ZCodeをPaseoのネイティブなAgent providerとして利用できる`/Applications/PaseoZCode.app`を生成する。ZCodeのstreaming、reasoning、tool実行、権限確認、構造化質問、プラン提案、todo、model・thinking level・mode選択、session persistenceをPaseoの既存UIへ直接写像する。
+`paseo-zcode-patcher`は、ZCodeをPaseoのネイティブなAgent providerとして利用できる`/Applications/PaseoZCode.app`を生成する。ZCodeのstreaming、reasoning、tool実行、権限確認、構造化質問、プラン提案、todo、model・thinking level・mode選択、session persistenceをPaseoの既存UIへ直接写像し、provider iconにはPaseo標準のGLM Agent iconを使用する。
 
 特にプランモードでは、Markdownプランを「タスク」ではなくPaseo既存の`PlanCard`として表示し、ZCodeが提示したApprove/Dismissの意味を保持したまま応答する。
 
@@ -29,7 +29,7 @@
 次は初版の対象外である。
 
 - ACP client/server機能
-- rendererの変更または新しいUI component
+- ZCode iconの既存GLM Agent iconへの対応付け以外のrenderer変更、または新しいUI component
 - Linux、Windows、macOS x64
 - 複数Paseo versionまたは複数ZCode versionの同時サポート
 - ZCodeのinstall、update、login、logout、credential管理
@@ -52,6 +52,7 @@
 ### 3.2 Agent利用
 
 - provider一覧では`ZCode`として表示する。
+- provider iconはPaseo標準のGLM Agentと同じ既存Z.ai SVGを表示する。
 - model、thinking level、modeはZCode workspace stateから取得する。
 - modeは`build`、`edit`、`plan`、`yolo`を公開する。`yolo`だけをunattended modeとして明示する。
 - ZCode session IDをPaseoのnative persistence handleとして保持し、同じworkspaceでresumeする。
@@ -77,6 +78,7 @@ providerは同じnative requestに含まれる`input.plan`、request ID、option
 ### FR-1: Provider availabilityとcatalog
 
 - provider IDは`zcode`、labelは`ZCode`とする。
+- rendererの`zcode` icon IDを既存catalog ID `glm-acp-agent`へ解決する。新しい画像assetは追加しない。
 - `/Applications/ZCode.app`の検出、compatibility gate、軽量runtime smokeが成功した場合だけavailableにする。
 - model IDは`[providerId, modelId, variant|null]`のJSON文字列とし、native参照へ可逆に戻す。
 - thinking optionsはZCodeの`thoughtLevel.available`から生成し、sessionの`current`またはworkspaceの`defaultLevel`を既定値にする。
@@ -125,7 +127,7 @@ providerは同じnative requestに含まれる`input.plan`、request ID、option
 - unsupported artifactを推測やfallbackで起動しないこと。
 - providerのstdout/stderrとPaseo daemonのprotocol/logを混在させないこと。
 - shutdownでsubscription、pending interaction、child processを解放すること。
-- renderer、既存provider、既存ACP経路へ変更を加えないこと。
+- ZCode icon IDの対応付けを除き、renderer、既存provider、既存ACP経路へ変更を加えないこと。
 
 ## 6. 受け入れ条件
 
@@ -133,10 +135,11 @@ providerは同じnative requestに含まれる`input.plan`、request ID、option
 
 1. patcherのtypecheck、unit test、format check、buildが成功する。
 2. version固定Paseo sourceへpatchを適用し、protocol/serverのfocused testとbuildが成功する。
-3. 元ASAR、overlay、生成ASAR、全変更entryのhashをmanifestへ固定できる。
+3. 元ASAR、renderer resource、overlay、生成ASAR、全変更entryのhashをmanifestへ固定できる。
 4. `PaseoZCode.app`が厳密な署名検証を通り、元Paseoが変更されていない。
 5. 実機でprovider catalog、session create/resume、streaming、reasoning、tool permission、structured input、cancelを確認できる。
 6. plan modeでMarkdownが`PlanCard`、todosが`TodoListCard`に別々に表示される。
 7. Approve/Dismissが正しいnative request IDとoption IDへexactly onceで返る。
 8. unsupported Paseo/ZCode、未知event、不正interactionがfail closedになる。
 9. credential、provider header、prompt/tool本文が生成物や既定ログへ混入しない。
+10. model pickerとcomposerでZCodeがGLM Agentと同じ既存iconを表示する。

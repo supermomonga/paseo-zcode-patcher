@@ -4,30 +4,32 @@
 
 ## 現在の状態
 
-Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、検証済み overlay を実装し、`/Applications/PaseoZCode.app` の生成と実機確認まで完了した。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
+Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、検証済み overlay を実装している。子ツールの入力省略による履歴同期失敗を修正し、`/Applications/PaseoZCode.app`へ適用済み。元の会話の最終回答表示と同期エラーの解消を実画面で確認した。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
 
 | Area | Status | 証拠 |
 | --- | --- | --- |
-| Architecture/ADR | complete | ADR 0002–0010 は Accepted、`adrs doctor` は error 0 |
+| Architecture/ADR | complete | ADR 0002–0011 は Accepted、`adrs doctor` は error 0 |
 | Patcher CLI | complete | `patch` 以外を拒否し、固定 path、preflight、process 検出、cleanup をテスト |
 | ASAR patcher | complete | header 保持、entry hash、marker、整合性情報、決定性を fixture で検証 |
-| Paseo source patch | complete | 固定 commit に whitespace error なしで適用し、protocol/server の型検査と build に成功 |
+| Paseo source patch | complete | 固定 commit に whitespace error なしで適用し、protocol/server の型検査、build、provider icon focused test に成功 |
 | ZCode runtime discovery | complete | app/CLI/host/RPC の version、hash、export、path を実機と自動テストで検証 |
 | Host bridge | complete | method allowlist、schema、request 相関、上限、timeout、終了処理を実装 |
 | Provider/session mapper | complete | catalog、stream、履歴、permission、question、plan、todo、cancel を実装 |
-| Overlay/manifest | complete | 18 entry と生成 hash を manifest に固定 |
+| Overlay/manifest | complete | ASAR 18 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
 | Provider runtime evidence | complete | 実機 host で catalog、prompt、resume/history、Plan の Dismiss/Approve を確認 |
 | macOS app/signing | complete | `/Applications/PaseoZCode.app` を生成し、strict 署名、3 回の独立 cold start、正常停止を確認 |
-| UI integration | complete | ZCode が「利用可能・4つのモデル」と表示され、実機 PlanCard に Markdown と Approve/Dismiss が表示されることを確認 |
+| UI integration | complete | ZCodeが「利用可能・4つのモデル」と表示され、PlanCardとmodel picker/composerのZ.ai iconを実画面で確認 |
 
 ## 固定された成果物
 
 | 項目 | 値 |
 | --- | --- |
 | package | `paseo-zcode-patcher@0.1.0`、`private: true` |
-| overlay entry 数 | 18 |
-| overlay SHA-256 | `af28209c4bbb26c4bab2901feb2cb52d28e82dc3327f2b22d204005f5fdce5d4` |
-| 生成後 `app.asar` SHA-256 | `6c3531db45cb75e9c2efd9748527c8cdb462ab13c10c8e5455e430ac369242c8` |
+| ASAR overlay entry 数 | 18 |
+| renderer resource entry 数 | 1 |
+| renderer resource SHA-256 | `067e03e488a5fcee5657f21da99e301c9eb31e5e6f0687481cd776c623690f77` |
+| overlay SHA-256 | `c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03` |
+| 生成後 `app.asar` SHA-256 | `48ebc26679c0af07ba68f94b1a573f58475af5abfcf9f545f60d6001b1a38f78` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -51,13 +53,14 @@ overlay は固定 Paseo source archive から独立に再生成して同じ hash
 その後、次を実機で確認した。
 
 - `node dist/src/cli.js patch` が固定出力 `/Applications/PaseoZCode.app` を生成した。
-- 出力 ASAR は当時のmanifest SHA-256 `0fa10f90161111128e83da0420851ef3c78b548ec8d2ade26fe49e891219bd32` と一致した。
+- 出力 ASAR は当時のmanifest SHA-256と一致した。icon resource追加後の再生成値は`0c8e399e3df263ec32794d4e24c9e0b024ef5aac47b184b4e8f61fd6e3b7b3b5`である。
 - 元 Paseo ASAR は SHA-256 `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` のままである。
 - `codesign --verify --deep --strict --verbose=2` が成功した。
 - 異なる `PASEO_HOME` と Electron user-data directory を使う cold start を 3 回行い、各回で画面と daemon の起動、終了時の lifecycle RPC による正常停止を確認した。
 - 設定画面と新規 workspace の model picker で ZCode が 4 model を返した。
+- model pickerのZCode providerと4 model、ZCode model選択後のcomposerに、GLM Agentと同じZ.ai iconが表示された。
 - ZCode の `plan` mode で Markdown 全体、`Approve`、`Dismiss` が既存 `PlanCard` に表示された。確認セッションは Dismiss し、workspace を変更しなかった。
-- todo は plan とは別の timeline event のまま `TodoListCard` へ渡されることを focused test で確認した。renderer は変更していない。
+- todo は plan とは別の timeline event のまま `TodoListCard` へ渡されることを focused test で確認した。interaction表示のrendererは変更していない。
 - 終了後に PaseoZCode、ZCode host、ZCode Helper の残存プロセスがないことを確認した。
 
 ### Thinking選択欄の修正
@@ -76,14 +79,21 @@ Paseoはcomposerから送信した発言を`clientMessageId`付きで先にtimel
 
 修正版アプリで新規sessionを作成し、一意なpromptを送信した。user messageの吹き出しが1件だけ表示され、ZCodeの応答が正常に完了することを実画面で確認した。
 
+### ZCode iconの修正
+
+Paseoのprovider icon解決は未知のIDを汎用ロボアイコンへfallbackする。`zcode`はこの既知ID一覧に含まれないため、model pickerでロボアイコンになっていた。
+
+`resolveProviderIconName("zcode")`を既存catalog ID `glm-acp-agent`へ明示的に解決し、PaseoがGLM Agent用に同梱するZ.ai SVGをそのまま再利用するよう修正した。新しい画像assetやZCode専用componentは追加していない。固定Paseo sourceから生成したmain renderer bundleだけをresource overlayへ追加し、元・生成hashとほかのrenderer build outputが不変であることを検証する。
+
+icon対応済み`/Applications/PaseoZCode.app`を生成し、model pickerのZCode provider行と4 model、ZCode model選択後のcomposerで同じZ.ai iconを実画面確認した。終了後にPaseoZCode、ZCode host、ZCode Helperの残存processがないことも確認した。
+
 ### 子ツール実行後の履歴同期修正の検証
 
 入力を省略した子ツール通知の扱いは[Provider contract](provider-contract.md#6-event-mapping)に定義する。通常ツールの入力と親の最終回答を保持し、子ツールの成功・失敗の両方を含む履歴応答がJSON変換後のWebSocket validatorに適合する回帰testを追加した。修正前は同testで失敗し、修正後は成功した。
 
-作業中のicon対応を含むoverlay buildは関連100 testとprotocol/serverの型検査に成功した。生成したoverlayへ実機採取済みの通知35件を再投入し、初期snapshotを除く各通知後の履歴応答34回がすべてvalidatorを通り、親の最終回答と正常終了が保持されることを確認した。今回の修正だけを取り出したpatcherは18 test成功、runtime opt-in testは通常実行で1件skip。今回変更したファイルに対するupstream lintは修正前後とも同じ既存10 errorで、新規errorはない。
+固定ソースからのoverlay buildは関連100 testとprotocol/serverの型検査に成功した。生成したoverlayへ実機採取済みの通知35件を再投入し、初期snapshotを除く各通知後の履歴応答34回がすべてvalidatorを通り、親の最終回答と正常終了が保持されることを確認した。patcherは20 test成功、runtime opt-in testは通常実行で1件skip。今回変更したファイルに対するupstream lintは修正前後とも同じ既存10 errorで、新規errorはない。
 
-ユーザーの許可により起動中の旧`zcode-acp`を終了し、修正版アプリを生成・署名した。実機検証は別途作業中のicon対応を含むアプリで行い、その成果物とのhash一致と元Paseo ASAR不変を確認した。元の会話を修正版アプリで開き、Exploreの結果を含む最終回答が表示され、履歴同期エラーが出ないことを確認した。元の会話へのプロンプト再送は行っていない。
-
+ユーザーの許可により起動中の旧`zcode-acp`を終了し、修正版アプリを生成・署名した。インストール済みASARとmanifestのhash一致、元Paseo ASAR不変を確認した。元の会話を修正版アプリで開き、Exploreの結果を含む最終回答が表示され、履歴同期エラーが出ないことを確認した。元の会話へのプロンプト再送は行っていない。
 
 ## 配布上の制約
 
@@ -93,7 +103,7 @@ Paseoはcomposerから送信した発言を`clientMessageId`付きで先にtimel
 
 ## 変更禁止範囲
 
-- Paseo renderer と既存 UI component
+- ZCode icon IDの対応付け以外のPaseo rendererと既存UI component
 - 既存 Paseo provider と ACP 経路
 - `zcode-acp` repository の公開 API または build
 - 元 Paseo/ZCode install artifact

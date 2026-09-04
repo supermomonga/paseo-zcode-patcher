@@ -12,7 +12,7 @@
 - ZCodeの探索、互換性判定、host起動、session管理、event変換は`zcode-acp`の検証済み実装をNode.js向けに移植する。
 - provider IDは`zcode`とし、Paseoの組み込みプロバイダーとして登録する。
 - ACPおよび外部`zcode-acp`プロセスは実行経路に含めない。
-- rendererは変更せず、既存の`PlanCard`、`QuestionFormCard`、`TodoListCard`を使用する。
+- interaction用renderer componentは変更せず、既存の`PlanCard`、`QuestionFormCard`、`TodoListCard`を使用する。ZCodeのprovider iconだけはPaseo標準のGLM Agent iconへ対応付ける。
 - 初版はPaseo 0.7.2 / macOS arm64とZCode 3.11.2の組合せだけを厳密にサポートする。
 - `/Applications/Paseo.app`、`/Applications/ZCode.app`、Paseo設定、ZCode設定・credentialは変更しない。
 
@@ -40,6 +40,6 @@
 | `paseo-acp-patcher`参照commit | `6c5c824e6eaa581f90cb1e809e1a59d61d2740f4` |
 | `zcode-acp`参照commit | `7b3af187d7ee732e9043aed873a863fc855625c2` |
 
-生成済み overlay は 18 entry で、overlay SHA-256 は `26b27cf48778d6ea41f03dfc4ff99d6caf76fa64d2ae1335111b496c8494dedf`、生成後 ASAR SHA-256 は `0fa10f90161111128e83da0420851ef3c78b548ec8d2ade26fe49e891219bd32` である。entry ごとの hash は `artifacts/paseo-0.7.2-arm64/manifest.json` を正とする。
+生成済み overlay は ASAR 18 entryとrenderer resource 1 entryで、overlay SHA-256 は `c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03`、生成後 ASAR SHA-256 は `48ebc26679c0af07ba68f94b1a573f58475af5abfcf9f545f60d6001b1a38f78` である。entry ごとの hash は `artifacts/paseo-0.7.2-arm64/manifest.json` を正とする。
 
-provider と `/Applications/PaseoZCode.app` の実機検証は完了している。生成 hash、strict 署名、3 回の独立 cold start、ZCode の利用可能表示、PlanCard の画面確認結果は [Implementation status](implementation-status.md) に記録する。
+provider と `/Applications/PaseoZCode.app` の実機検証は完了している。生成 hash、strict 署名、3 回の独立 cold start、ZCode の利用可能表示、PlanCard、model pickerとcomposerのZCode iconの画面確認結果は [Implementation status](implementation-status.md) に記録する。

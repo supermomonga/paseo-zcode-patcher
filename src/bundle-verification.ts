@@ -55,11 +55,11 @@ export async function restoreSymlinkTimestamps(
 
 async function inventory(
   root: string,
-  ignoredRelativePath: string,
+  ignoredRelativePaths: ReadonlySet<string>,
 ): Promise<Map<string, InventoryEntry>> {
   const result = new Map<string, InventoryEntry>();
   for (const relative of ["", ...(await walk(root))]) {
-    if (relative === ignoredRelativePath) continue;
+    if (ignoredRelativePaths.has(relative)) continue;
     const absolute = path.join(root, relative);
     const stat = await fs.lstat(absolute, { bigint: true });
     const type = stat.isDirectory()
@@ -121,11 +121,12 @@ export async function verifyBundleXattrs(
 export async function verifyBundleCopy(
   sourceRoot: string,
   destinationRoot: string,
-  ignoredRelativePath: string,
+  ignoredRelativePaths: readonly string[],
 ): Promise<void> {
+  const ignored = new Set(ignoredRelativePaths);
   const [sourceInventory, destinationInventory] = await Promise.all([
-    inventory(sourceRoot, ignoredRelativePath),
-    inventory(destinationRoot, ignoredRelativePath),
+    inventory(sourceRoot, ignored),
+    inventory(destinationRoot, ignored),
   ]);
   if (sourceInventory.size !== destinationInventory.size) {
     throw new Error("application copy contains a different number of entries");

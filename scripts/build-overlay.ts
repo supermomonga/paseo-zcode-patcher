@@ -9,6 +9,8 @@ import {
   ARTIFACT_ID,
   PATCH_FORMAT,
   TARGET_PASEO_COMMIT,
+  TARGET_PASEO_RENDERER_RESOURCE,
+  TARGET_PASEO_RENDERER_SHA256,
   TARGET_PASEO_VERSION,
   TARGET_ZCODE_APP_VERSION,
   TARGET_ZCODE_CLI_SHA256,
@@ -20,7 +22,11 @@ import {
   TARGET_ZCODE_RPC_SHA256,
   ZCODE_REFERENCE_COMMIT,
 } from "../src/constants.js";
-import { computeOverlayHash, sha256Buffer, sha256File } from "../src/hashes.js";
+import {
+  computePatchOverlayHash,
+  sha256Buffer,
+  sha256File,
+} from "../src/hashes.js";
 import type { OverlayEntry, PatchManifest } from "../src/manifest.js";
 
 const EXPECTED_SOURCE_ASAR =
@@ -203,12 +209,99 @@ async function copyOverlayFile(
   };
 }
 
+async function regularFiles(root: string): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (entry.isFile()) {
+        result.set(
+          path.relative(root, absolute).split(path.sep).join("/"),
+          await sha256File(absolute),
+        );
+      }
+    }
+  }
+  await visit(root);
+  return result;
+}
+
+async function builtRendererBundle(
+  buildRoot: string,
+  sourceResources: string,
+): Promise<string> {
+  const builtApp = path.join(buildRoot, "packages/app/dist");
+  const sourceApp = path.join(sourceResources, "app-dist");
+  const builtFiles = await regularFiles(builtApp);
+  const sourceFiles = await regularFiles(sourceApp);
+  const bundlePattern = /^_expo\/static\/js\/web\/index-[0-9a-f]{32}\.js$/u;
+  const builtBundles = [...builtFiles.keys()].filter((file) =>
+    bundlePattern.test(file),
+  );
+  const sourceBundles = [...sourceFiles.keys()].filter((file) =>
+    bundlePattern.test(file),
+  );
+  if (builtBundles.length !== 1 || sourceBundles.length !== 1) {
+    throw new Error(
+      "expected exactly one built and one source renderer bundle",
+    );
+  }
+  const builtBundle = builtBundles[0]!;
+  const sourceBundle = sourceBundles[0]!;
+  if (
+    sourceBundle !== TARGET_PASEO_RENDERER_RESOURCE.slice("app-dist/".length)
+  ) {
+    throw new Error(
+      "source renderer bundle path does not match the fixed artifact",
+    );
+  }
+  if (sourceFiles.get(sourceBundle) !== TARGET_PASEO_RENDERER_SHA256) {
+    throw new Error(
+      "source renderer bundle hash does not match the fixed artifact",
+    );
+  }
+  for (const file of ["index.html", builtBundle]) builtFiles.delete(file);
+  for (const file of ["index.html", sourceBundle]) sourceFiles.delete(file);
+  const sortedBuiltFiles = [...builtFiles].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  const sortedSourceFiles = [...sourceFiles].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (JSON.stringify(sortedBuiltFiles) !== JSON.stringify(sortedSourceFiles)) {
+    throw new Error("renderer build changed files outside the main bundle");
+  }
+  return path.join(builtApp, builtBundle);
+}
+
+async function copyResourceOverlayFile(
+  source: string,
+  target: string,
+  overlayDirectory: string,
+  sourceResources: string,
+): Promise<OverlayEntry> {
+  const artifactSource = `resources/${target}`;
+  const destination = path.join(overlayDirectory, artifactSource);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(source, destination);
+  const contents = await fs.readFile(destination);
+  const originalSha256 = await sha256File(path.join(sourceResources, target));
+  return {
+    path: target,
+    source: artifactSource,
+    sha256: sha256Buffer(contents),
+    originalSha256,
+  };
+}
+
 async function main(): Promise<void> {
   const checkout = option("--paseo-source");
   const sourceAsar = option(
     "--source-asar",
     "/Applications/Paseo.app/Contents/Resources/app.asar",
   );
+  const sourceResources = path.dirname(sourceAsar);
   await assertFixedCleanCheckout(checkout);
   if ((await sha256File(sourceAsar)) !== EXPECTED_SOURCE_ASAR) {
     throw new Error(
@@ -225,6 +318,7 @@ async function main(): Promise<void> {
       "git",
       [
         "apply",
+        "--unidiff-zero",
         "--whitespace=error-all",
         path.join(repositoryRoot, "patches/paseo-v0.7.2-zcode.patch"),
       ],
@@ -233,6 +327,11 @@ async function main(): Promise<void> {
     await run("npm", ["ci", "--ignore-scripts"], temporaryRoot);
     await run("npm", ["run", "build:server-deps"], temporaryRoot);
     await run(
+      "npm",
+      ["run", "build", "--workspace=@getpaseo/expo-two-way-audio"],
+      temporaryRoot,
+    );
+    await run(
       "npx",
       [
         "vitest",
@@ -240,6 +339,7 @@ async function main(): Promise<void> {
         "packages/server/src/server/agent/provider-registry.test.ts",
         "packages/server/src/server/agent/provider-registry-wrap.test.ts",
         "packages/server/src/server/agent/providers/zcode",
+        "packages/app/src/components/provider-icon-name.test.ts",
       ],
       temporaryRoot,
     );
@@ -262,6 +362,19 @@ async function main(): Promise<void> {
       "npm",
       ["run", "build", "--workspace=@getpaseo/server"],
       temporaryRoot,
+    );
+    await run(
+      "npx",
+      [
+        "cross-env",
+        "PASEO_WEB_PLATFORM=electron",
+        "npx",
+        "expo",
+        "export",
+        "--platform",
+        "web",
+      ],
+      path.join(temporaryRoot, "packages/app"),
     );
 
     const providerEntry = path.join(
@@ -297,7 +410,15 @@ async function main(): Promise<void> {
         ),
       );
     }
-    const overlayHash = computeOverlayHash(entries);
+    const resourceEntries = [
+      await copyResourceOverlayFile(
+        await builtRendererBundle(temporaryRoot, sourceResources),
+        TARGET_PASEO_RENDERER_RESOURCE,
+        overlayDirectory,
+        sourceResources,
+      ),
+    ];
+    const overlayHash = computePatchOverlayHash(entries, resourceEntries);
     const manifest: PatchManifest = {
       artifactId: ARTIFACT_ID,
       paseo: {
@@ -323,6 +444,7 @@ async function main(): Promise<void> {
       markerPath: "paseo-zcode-patcher.json",
       overlayHash,
       entries,
+      resourceEntries,
     };
     const first = path.join(temporaryRoot, "patched-first.asar");
     const second = path.join(temporaryRoot, "patched-second.asar");

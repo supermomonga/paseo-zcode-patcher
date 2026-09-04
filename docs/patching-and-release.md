@@ -26,7 +26,7 @@ paseo-zcode-patcher patch
 
 1. macOS arm64、Node.js 22.12.0以上である。
 2. patcher manifest、overlay各entry、overlay全体のhashが一致する。
-3. 元Paseoがsymlinkでないdirectoryで、version、architecture、元ASAR hashが対応対象と一致する。
+3. 元Paseoがsymlinkでないdirectoryで、version、architecture、元ASAR hash、元renderer resource hashが対応対象と一致する。
 4. ZCode discovery、artifact identity、host contract、CLI runtime smokeが成功する。
 5. Paseo GUI、renderer、Helper、daemon、supervisor、およびproviderが起動したZCode host childが停止している。
 6. 一時bundleとASAR生成に必要な空き容量がある。
@@ -38,13 +38,13 @@ paseo-zcode-patcher patch
 
 1. 事前検証後、固定出力が存在すればtarget pathを厳密に検証して削除する。symlinkならリンク自体だけを対象とする。
 2. `/usr/bin/ditto --clone`で`/Applications`内の一意な一時bundleへ元Paseoをコピーする。
-3. clone内ASARが元hashと一致することを確認する。
-4. clone内ASARだけへversion固定overlayを適用する。
-5. overlay entry、marker、ASAR全体のhashをmanifestで検証する。
+3. clone内ASARとrenderer resourceが元hashと一致することを確認する。
+4. clone内ASARへprovider overlayを適用し、固定されたmain renderer bundleへresource overlayを適用する。
+5. ASAR/resource overlay entry、marker、ASAR全体のhashをmanifestで検証する。
 6. `ditto --clone`で保持されないsymlink timestampを元bundleへ合わせる。
-7. ASAR以外のentry type、mode、uid、gid、size、mtime/birthtime、file hashまたはsymlink target、bundle xattrを比較する。
+7. manifestで宣言したASAR/resource entry以外のentry type、mode、uid、gid、size、mtime/birthtime、file hashまたはsymlink target、bundle xattrを比較する。
 8. 元entitlementsを保持して一時bundle全体をad-hoc再署名する。
-9. strict code-sign verification、ASAR、xattrを再検証する。
+9. strict code-sign verification、ASAR、renderer resource、xattrを再検証する。
 10. 一時bundleを`/Applications/PaseoZCode.app`へrenameし、最終検証する。
 
 失敗時は一時bundleと不完全な固定出力を削除し、元Paseoと元ZCodeが変わっていないことを再確認する。
@@ -67,7 +67,7 @@ marker pathは`paseo-zcode-patcher.json`とし、次を含める。
   "paseoVersion": "0.7.2",
   "paseoSourceCommit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
   "originalAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-  "overlaySha256": "26b27cf48778d6ea41f03dfc4ff99d6caf76fa64d2ae1335111b496c8494dedf",
+  "overlaySha256": "c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03",
   "zcodeArtifact": "zcode-host-3.11.2",
   "zcodeProtocol": "zcode-task-v1",
   "zcodeAcpReferenceCommit": "7b3af187d7ee732e9043aed873a863fc855625c2",
@@ -84,11 +84,12 @@ markerはtimestampやmachine固有pathを含まず、上記の固定値から決
 - protocolのbuilt-in provider definitionへ`zcode`を追加
 - server provider registryへZCode client factoryとcontractを追加
 - Node互換のZCode discovery、host bridge、schema、session、mapperを追加
+- rendererの`zcode` icon IDを既存の`glm-acp-agent` catalog iconへ対応付け
 - focused testと必要なpackage dependencyを追加
 
-renderer、既存provider、既存ACP client、既存SDKは変更しない。
+ZCode icon IDの対応付け以外のrenderer、既存provider、既存ACP client、既存SDKは変更しない。新しい画像assetやZCode専用componentは追加しない。
 
-`scripts/build-overlay.ts`は指定Paseo checkoutが固定commitでcleanであることを確認し、`git archive`で一時directoryへ展開する。そこでsource patch適用、frozen install、protocol/server focused test、typecheck、buildを行い、overlayとmanifestを生成する。指定checkoutのworking treeは変更しない。
+`scripts/build-overlay.ts`は指定Paseo checkoutが固定commitでcleanであることを確認し、`git archive`で一時directoryへ展開する。そこでsource patch適用、frozen install、protocol/server/provider/icon focused test、typecheck、server build、Electron向けrenderer exportを行い、overlayとmanifestを生成する。renderer exportはmain bundleと参照用`index.html`以外が元アプリと同一であることを検証し、main bundleだけを元と同じ固定pathへ置換するresource entryとして保存する。指定checkoutのworking treeは変更しない。
 
 ZCode接続実装は`zcode-acp`参照commitの意味論をNode.jsへ移植する。Bun API、ACP server、ACP型、ACP fallbackをoverlayへ含めない。
 
@@ -98,7 +99,7 @@ ZCode接続実装は`zcode-acp`参照commitの意味論をNode.jsへ移植する
 
 - Paseo version、source commit、platform、architecture
 - 元・生成ASAR SHA-256
-- 追加・置換entryの元・生成hash
+- ASARの追加・置換entryとrenderer resource置換entryの元・生成hash
 - overlay hashとpatch format
 - marker path
 - ZCode app/CLI version、artifact/protocol ID、host/RPC hash、required exports
@@ -127,4 +128,6 @@ patcherは次を行わない。
 
 ## 9. Release artifact
 
-初版releaseはnpm package/CLI sourceとversion固定overlay/manifestを含み、PaseoまたはZCode本体を含めない。release前にlockfile、checksums、dependency license一覧を検証する。生成済み`PaseoZCode.app`自体は配布しない。
+初版releaseはnpm package/CLI sourceとversion固定overlay/manifestを含む。overlayには固定Paseo sourceから生成したmain renderer bundle 1 fileを含むが、PaseoまたはZCodeの完全なアプリ本体は含めない。release前にlockfile、checksums、dependency license一覧を検証する。生成済み`PaseoZCode.app`自体は配布しない。
+
+通常の`node_modules/`はrepositoryで追跡しないが、`artifacts/*/overlay/node_modules/`はASARへ適用するversion固定成果物なので例外として追跡する。クリーンなcheckoutから`npm pack --dry-run`を実行し、manifestが参照するASAR 18 entryとrenderer resource 1 entryがpackageへ含まれることを確認する。

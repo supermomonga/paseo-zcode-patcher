@@ -21,6 +21,10 @@ import {
 import { sha256Buffer, sha256File } from "../hashes.js";
 import { loadManifest } from "../manifest.js";
 import { findRunningRelatedProcesses } from "../process-check.js";
+import {
+  applyResourceOverlay,
+  verifyResourceEntries,
+} from "../resource-patcher.js";
 import { captureCommand, runCommand } from "../system.js";
 import {
   assertZCodeAvailable,
@@ -199,15 +203,21 @@ export async function patchCommand(): Promise<void> {
   const artifacts = artifactDirectory();
   const manifest = await loadManifest(artifacts);
   const sourceAsar = path.join(SOURCE_APP_PATH, ASAR_RELATIVE_PATH);
+  const sourceResources = path.dirname(sourceAsar);
   const originalHash = await assertSourceBundle(
     manifest.paseo.sourceAsarSha256,
+  );
+  await verifyResourceEntries(
+    sourceResources,
+    manifest.resourceEntries,
+    "original",
   );
   const zcodeDiagnostic = await runZCodeRuntimeSmoke(
     await discoverZCodeRuntime(),
   );
   assertZCodeAvailable(zcodeDiagnostic);
   const overlaySizes = await Promise.all(
-    manifest.entries.map(async (entry) =>
+    [...manifest.entries, ...manifest.resourceEntries].map(async (entry) =>
       BigInt(
         (await fs.stat(path.join(artifacts, "overlay", entry.source))).size,
       ),
@@ -229,6 +239,11 @@ export async function patchCommand(): Promise<void> {
   }
 
   await assertSourceBundle(originalHash);
+  await verifyResourceEntries(
+    sourceResources,
+    manifest.resourceEntries,
+    "original",
+  );
   await verifyZCodeIdentity(zcodeDiagnostic);
   await removeExistingOutput();
   const temporaryBundle = `/Applications/.PaseoZCode.app.${process.pid}.${randomUUID()}`;
@@ -243,11 +258,17 @@ export async function patchCommand(): Promise<void> {
       temporaryBundle,
     ]);
     const temporaryAsar = path.join(temporaryBundle, ASAR_RELATIVE_PATH);
+    const temporaryResources = path.dirname(temporaryAsar);
     const sourceResourcesStat = await fs.stat(path.dirname(sourceAsar));
     if ((await sha256File(temporaryAsar)) !== originalHash) {
       throw new Error("cloned source ASAR does not match the original");
     }
     await patchAsar(temporaryAsar, temporaryAsar, artifacts, manifest);
+    await applyResourceOverlay(
+      temporaryResources,
+      artifacts,
+      manifest.resourceEntries,
+    );
     for (const entry of manifest.entries) {
       const actual = sha256Buffer(
         await readAsarEntry(temporaryAsar, entry.path),
@@ -262,11 +283,12 @@ export async function patchCommand(): Promise<void> {
       sourceResourcesStat.mtime,
     );
     await restoreSymlinkTimestamps(SOURCE_APP_PATH, temporaryBundle);
-    await verifyBundleCopy(
-      SOURCE_APP_PATH,
-      temporaryBundle,
+    await verifyBundleCopy(SOURCE_APP_PATH, temporaryBundle, [
       ASAR_RELATIVE_PATH,
-    );
+      ...manifest.resourceEntries.map((entry) =>
+        path.join("Contents/Resources", entry.path),
+      ),
+    ]);
     await verifyZCodeIdentity(zcodeDiagnostic);
     await runCommand("/usr/bin/codesign", [
       "--force",
@@ -290,6 +312,11 @@ export async function patchCommand(): Promise<void> {
     ) {
       throw new Error("ad-hoc signing changed the patched ASAR");
     }
+    await verifyResourceEntries(
+      temporaryResources,
+      manifest.resourceEntries,
+      "patched",
+    );
     await fs.rename(temporaryBundle, OUTPUT_APP_PATH);
     const installedHash = await sha256File(
       path.join(OUTPUT_APP_PATH, ASAR_RELATIVE_PATH),
@@ -297,6 +324,11 @@ export async function patchCommand(): Promise<void> {
     if (installedHash !== manifest.paseo.patchedAsarSha256) {
       throw new Error(`installed ASAR verification failed: ${installedHash}`);
     }
+    await verifyResourceEntries(
+      path.join(OUTPUT_APP_PATH, "Contents/Resources"),
+      manifest.resourceEntries,
+      "patched",
+    );
     await runCommand("/usr/bin/codesign", [
       "--verify",
       "--deep",
@@ -306,6 +338,11 @@ export async function patchCommand(): Promise<void> {
     if ((await sha256File(sourceAsar)) !== originalHash) {
       throw new Error("the original Paseo ASAR changed unexpectedly");
     }
+    await verifyResourceEntries(
+      sourceResources,
+      manifest.resourceEntries,
+      "original",
+    );
     await verifyZCodeIdentity(zcodeDiagnostic);
   } catch (error) {
     await fs.rm(temporaryBundle, { recursive: true, force: true });
@@ -317,6 +354,11 @@ export async function patchCommand(): Promise<void> {
         `patch failed and the original Paseo ASAR changed unexpectedly: ${currentOriginalHash}`,
       );
     }
+    await verifyResourceEntries(
+      sourceResources,
+      manifest.resourceEntries,
+      "original",
+    );
     throw error;
   }
 

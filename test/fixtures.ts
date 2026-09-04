@@ -29,5 +29,6 @@ export function manifestFixture(sourceAsarSha256: string): PatchManifest {
     markerPath: "paseo-zcode-patcher.json",
     overlayHash: "0".repeat(64),
     entries: [],
+    resourceEntries: [],
   };
 }

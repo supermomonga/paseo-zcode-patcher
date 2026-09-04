@@ -2,3 +2,5 @@ node_modules/
 dist/
 .overlay-work/
 *.log
+!artifacts/*/overlay/node_modules/
+!artifacts/*/overlay/node_modules/**

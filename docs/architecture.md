@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-    U["User"] --> R["既存Paseo renderer"]
+    U["User"] --> R["Paseo renderer + ZCode icon mapping"]
     R <-->|"Paseo protocol"| D["Paseo daemon"]
     D --> P["ZCodeAgentClient / ZCodeAgentSession"]
     P --> C["Session coordinator + event mapper"]
@@ -17,7 +17,7 @@ flowchart LR
     H --> W["Workspace / model providers / tools"]
 ```
 
-`paseo-zcode-patcher`はbuild時にPaseo sourceへZCode provider実装を追加し、生成物だけをASAR overlayとして保持する。実行時にはPaseo daemon内のproviderがZCode同梱Electronをchild processとして起動する。外部`zcode-acp` processやACP wire protocolは存在しない。
+`paseo-zcode-patcher`はbuild時にPaseo sourceへZCode provider実装と既存GLM Agent iconへの対応付けを追加し、生成したserver/protocolのASAR entryとmain renderer bundleだけをoverlayとして保持する。実行時にはPaseo daemon内のproviderがZCode同梱Electronをchild processとして起動する。外部`zcode-acp` processやACP wire protocolは存在しない。
 
 ## 2. Componentと責務
 
@@ -25,7 +25,7 @@ flowchart LR
 
 - platform、Node、元Paseo、ZCode compatibility、停止process、空き容量を事前検証する。
 - version固定overlayを一時アプリコピーへ適用する。
-- bundle同一性、ASAR、xattr、署名を検証して固定出力へ配置する。
+- bundle同一性、ASAR、renderer resource、xattr、署名を検証して固定出力へ配置する。
 - Paseo/ZCodeの設定、credential、install artifactを変更しない。
 
 ### 2.2 `ZCodeAgentClient`

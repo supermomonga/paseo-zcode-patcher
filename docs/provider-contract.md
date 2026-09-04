@@ -2,7 +2,7 @@
 
 最終更新: 2026-09-05
 
-この文書は、Paseo 0.7.2の`AgentClient` / `AgentSession`へZCode 3.11.2を直接接続する公開・内部contractを定義する。renderer contractは変更しない。
+この文書は、Paseo 0.7.2の`AgentClient` / `AgentSession`へZCode 3.11.2を直接接続する公開・内部contractを定義する。interaction用renderer contractは変更せず、provider icon IDだけを既存catalogへ対応付ける。
 
 ## 1. Provider definition
 
@@ -14,6 +14,7 @@
 | Built-in | yes |
 | Enabled by default | yes |
 | Static default mode | `null`。ZCode workspaceの現在値を使用 |
+| Icon | Paseo標準の`glm-acp-agent` catalog icon |
 
 provider manifestへ次のmode visualsを追加する。
 

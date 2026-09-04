@@ -23,7 +23,7 @@ node dist/src/cli.js patch
 
 成功すると `/Applications/PaseoZCode.app` が作成されます。元の `/Applications/Paseo.app` と `/Applications/ZCode.app` は変更しません。既存の出力がある場合は、すべての事前検証が成功した後に限り置き換えます。
 
-固定対象では、生成 ASAR の hash、strict 署名、3 回の独立した cold start、ZCode の 4 model、既存 `PlanCard` の表示まで実機確認済みです。結果は [実装状況](docs/implementation-status.md) を参照してください。
+固定対象では、生成 ASAR とrenderer resourceのhash、strict 署名、3 回の独立した cold start、ZCode の 4 model、既存 `PlanCard`、GLM Agentと同じZ.ai iconの表示まで実機確認済みです。結果は [実装状況](docs/implementation-status.md) を参照してください。
 
 ## 開発と検証
 

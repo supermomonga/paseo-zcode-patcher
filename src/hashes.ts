@@ -27,3 +27,19 @@ export function computeOverlayHash(
   }
   return hash.digest("hex");
 }
+
+export function computePatchOverlayHash(
+  asarEntries: Array<{ path: string; sha256: string }>,
+  resourceEntries: Array<{ path: string; sha256: string }>,
+): string {
+  return computeOverlayHash([
+    ...asarEntries.map((entry) => ({
+      path: `asar/${entry.path}`,
+      sha256: entry.sha256,
+    })),
+    ...resourceEntries.map((entry) => ({
+      path: `resource/${entry.path}`,
+      sha256: entry.sha256,
+    })),
+  ]);
+}

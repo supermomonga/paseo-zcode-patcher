@@ -8,3 +8,4 @@
 * [8. 検証済みoverlayで破棄可能なPaseoアプリコピーを生成する](0008-検証済みoverlayで破棄可能なpaseoアプリコピーを生成する.md)
 * [9. 元entitlementsを保持してパッチ済みアプリをad-hoc署名する](0009-元entitlementsを保持してパッチ済みアプリをad-hoc署名する.md)
 * [10. PaseoとZCodeの外部状態をパッチャーから変更しない](0010-paseoとzcodeの外部状態をパッチャーから変更しない.md)
+* [11. ZCodeプロバイダーにGLM Agentの既存アイコンを割り当てる](0011-zcodeプロバイダーにglm-agentの既存アイコンを割り当てる.md)
