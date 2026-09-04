@@ -99,10 +99,10 @@ index c65db34b2d7327581055b38fa8b8166f7fdc6a14..859fa81e56733160862b57d273fcbe3d
  };
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.test.ts b/packages/server/src/server/agent/providers/zcode/agent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..91151922b13d3b514d5acf1601ed30f5032918f4
+index 0000000000000000000000000000000000000000..4e7b1ad420e84501cfcbb42f02a71e2e5af6ea92
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.test.ts
-@@ -0,0 +1,580 @@
+@@ -0,0 +1,616 @@
 +import { mkdtemp, rm } from "node:fs/promises";
 +import { tmpdir } from "node:os";
 +import { join } from "node:path";
@@ -253,6 +253,42 @@ index 0000000000000000000000000000000000000000..91151922b13d3b514d5acf1601ed30f5
 +});
 +
 +describe("ZCode native session", () => {
++  it("correlates the submitted prompt echo with the client message", async () => {
++    const { bridge, session } = await fixture();
++    const events: unknown[] = [];
++    session.subscribe((event) => events.push(event));
++
++    const { turnId } = await session.startTurn("hello", {
++      clientMessageId: "client-message-1",
++    });
++
++    expect(events).toContainEqual({
++      type: "timeline",
++      provider: "zcode",
++      turnId,
++      item: {
++        type: "user_message",
++        text: "hello",
++        messageId: turnId,
++        clientMessageId: "client-message-1",
++      },
++    });
++
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        seq: 0,
++        timestamp: 1,
++        deliveryKind: "desktop-continuous",
++        type: "turn.completed",
++        payload: { resultType: "success" },
++      },
++    });
++  });
++
 +  it("subscribes before sending and maps streaming, tools, usage, and todo", async () => {
 +    const { bridge, session, initial } = await fixture();
 +    const events: unknown[] = [];
@@ -685,10 +721,10 @@ index 0000000000000000000000000000000000000000..91151922b13d3b514d5acf1601ed30f5
 +});
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.ts b/packages/server/src/server/agent/providers/zcode/agent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..0b2ab1de2940b259b53db76cd0b0bdf3601ebabf
+index 0000000000000000000000000000000000000000..30461e3333754854b2c861bfbccb133d4f695a06
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.ts
-@@ -0,0 +1,1745 @@
+@@ -0,0 +1,1751 @@
 +import { randomUUID } from "node:crypto";
 +import { homedir } from "node:os";
 +import { isAbsolute } from "node:path";
@@ -1245,16 +1281,16 @@ index 0000000000000000000000000000000000000000..0b2ab1de2940b259b53db76cd0b0bdf3
 +
 +  async run(
 +    prompt: AgentPromptInput,
-+    _options?: AgentRunOptions
++    options?: AgentRunOptions
 +  ): Promise<AgentRunResult> {
-+    return (await this.beginTurn(prompt)).completion;
++    return (await this.beginTurn(prompt, options)).completion;
 +  }
 +
 +  async startTurn(
 +    prompt: AgentPromptInput,
-+    _options?: AgentRunOptions
++    options?: AgentRunOptions
 +  ): Promise<{ turnId: string }> {
-+    const turn = await this.beginTurn(prompt);
++    const turn = await this.beginTurn(prompt, options);
 +    void turn.completion.catch(() => undefined);
 +    return { turnId: turn.id };
 +  }
@@ -1572,7 +1608,10 @@ index 0000000000000000000000000000000000000000..0b2ab1de2940b259b53db76cd0b0bdf3
 +    });
 +  }
 +
-+  private async beginTurn(prompt: AgentPromptInput): Promise<ActiveTurn> {
++  private async beginTurn(
++    prompt: AgentPromptInput,
++    options?: AgentRunOptions
++  ): Promise<ActiveTurn> {
 +    this.assertOpen();
 +    if (this.active !== undefined) {
 +      throw new AdapterError(
@@ -1607,6 +1646,9 @@ index 0000000000000000000000000000000000000000..0b2ab1de2940b259b53db76cd0b0bdf3
 +      type: "user_message",
 +      text: nativePrompt.content,
 +      messageId: id,
++      ...(options?.clientMessageId === undefined
++        ? {}
++        : { clientMessageId: options.clientMessageId }),
 +    };
 +    this.pushTimeline(active, userItem);
 +    try {

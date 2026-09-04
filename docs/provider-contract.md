@@ -95,6 +95,8 @@ ZCode 3.11.2はworkspace stateでは`thoughtLevel.current`を返さず、`defaul
 | `close` | cancel、pending解決、subscription dispose、native close |
 | `describePersistence` | `{ provider: "zcode", sessionId, nativeHandle: sessionId }` |
 
+`startTurn`と`run`はPaseoから渡された`AgentRunOptions.clientMessageId`を保持し、送信したpromptに対応するlive `user_message`へ同じIDを付与する。PaseoはこのIDでcomposerの送信済み発言とprovider echoを照合する。IDのない別のuser messageを本文一致だけで除外しない。
+
 `steerActiveTurn`、feature、rewind、out-of-band promptは初版では公開しない。
 
 ## 5. Prompt input
