@@ -1,0 +1,6093 @@
+diff --git a/packages/protocol/src/provider-config.ts b/packages/protocol/src/provider-config.ts
+index 2ab879c..65b43b2 100644
+--- a/packages/protocol/src/provider-config.ts
++++ b/packages/protocol/src/provider-config.ts
+@@ -57,7 +57,7 @@ export const ProviderOverrideSchema = z.object({
+   order: z.number().optional(),
+ });
+ 
+-const BUILTIN_PROVIDER_IDS = ["claude", "codex", "copilot", "opencode", "pi", "omp"] as const;
++const BUILTIN_PROVIDER_IDS = ["claude", "codex", "copilot", "opencode", "pi", "zcode", "omp"] as const;
+ const PROVIDER_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
+ 
+ export const ProviderOverridesSchema = z
+diff --git a/packages/protocol/src/provider-manifest.ts b/packages/protocol/src/provider-manifest.ts
+index 82d0978..d7b01d5 100644
+--- a/packages/protocol/src/provider-manifest.ts
++++ b/packages/protocol/src/provider-manifest.ts
+@@ -167,6 +167,38 @@ export const OMP_MODES: AgentProviderModeDefinition[] = [
+   },
+ ];
+ 
++const ZCODE_MODES: AgentProviderModeDefinition[] = [
++  {
++    id: "build",
++    label: "Ask Before Changes",
++    description: "Ask before changing files or running tools",
++    icon: "Shield",
++    colorTier: "safe",
++  },
++  {
++    id: "edit",
++    label: "Edit Automatically",
++    description: "Edit files automatically while keeping other approvals",
++    icon: "ShieldPlus",
++    colorTier: "moderate",
++  },
++  {
++    id: "plan",
++    label: "Plan Mode",
++    description: "Inspect the workspace and present a plan before editing",
++    icon: "ShieldEllipsis",
++    colorTier: "planning",
++  },
++  {
++    id: "yolo",
++    label: "Full Access",
++    description: "Run tools without approval",
++    icon: "ShieldOff",
++    colorTier: "dangerous",
++    isUnattended: true,
++  },
++];
++
+ const MOCK_LOAD_TEST_MODES: AgentProviderModeDefinition[] = [
+   {
+     id: "load-test",
+@@ -247,6 +279,14 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
+     defaultModeId: null,
+     modes: [],
+   },
++  {
++    id: "zcode",
++    label: "ZCode",
++    description: "ZCode workspace agent with native planning, tools, and model selection",
++    enabledByDefault: true,
++    defaultModeId: null,
++    modes: ZCODE_MODES,
++  },
+   {
+     id: "omp",
+     label: "Oh My Pi",
+diff --git a/packages/server/src/server/agent/provider-registry.ts b/packages/server/src/server/agent/provider-registry.ts
+index c65db34..859fa81 100644
+--- a/packages/server/src/server/agent/provider-registry.ts
++++ b/packages/server/src/server/agent/provider-registry.ts
+@@ -47,6 +47,7 @@ import { OmpAgentClient } from "./providers/omp/agent.js";
+ import type { OmpRuntime } from "./providers/omp/runtime.js";
+ import { PiRpcAgentClient } from "./providers/pi/agent.js";
+ import { TraeACPAgentClient } from "./providers/trae-acp-agent.js";
++import { ZCodeAgentClient } from "./providers/zcode/agent.js";
+ import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
+ import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
+ import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
+@@ -156,6 +157,7 @@ const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
+   claude: { optionsSchema: ClaudeProviderOptionsSchema, supportsExactMcpPreapproval: true },
+   codex: { optionsSchema: CodexProviderOptionsSchema, supportsExactMcpPreapproval: true },
+   opencode: { optionsSchema: OpenCodeProviderOptionsSchema, supportsExactMcpPreapproval: true },
++  zcode: { optionsSchema: EmptyProviderOptionsSchema, supportsExactMcpPreapproval: false },
+ };
+ 
+ const UNSUPPORTED_PROVIDER_CONTRACT: ProviderContract = {
+@@ -230,6 +232,7 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
+       providerParams: options?.providerParams,
+       runtime: options?.ompRuntime,
+     }),
++  zcode: (logger) => new ZCodeAgentClient(logger),
+   mock: (logger) => new MockLoadTestAgentClient(logger),
+   "mock-slow": () => new MockSlowProviderClient(),
+ };
+diff --git a/packages/server/src/server/agent/providers/zcode/agent.test.ts b/packages/server/src/server/agent/providers/zcode/agent.test.ts
+new file mode 100644
+index 0000000..9115192
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/agent.test.ts
+@@ -0,0 +1,580 @@
++import { mkdtemp, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import type { z } from "zod";
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import { ZCodeAgentSession } from "./agent.js";
++import type { HostBridge, HostSubscription } from "./host/bridge.js";
++import type { Logger } from "./logger.js";
++import type {
++  DynamicEvent,
++  SessionSnapshot,
++} from "./protocol/v1/host-schemas.js";
++
++const temporaryDirectories: string[] = [];
++
++function snapshot(workspace: string): SessionSnapshot {
++  return {
++    session: {
++      sessionId: "session-1",
++      status: "idle",
++      workspace: { workspacePath: workspace },
++      title: "Session",
++      updatedAt: 1,
++    },
++    settings: {
++      model: {
++        current: { providerId: "provider", modelId: "model" },
++        available: [
++          {
++            ref: { providerId: "provider", modelId: "model" },
++            label: "Model",
++            providerLabel: "Provider",
++          },
++        ],
++      },
++      thoughtLevel: {
++        enabled: true,
++        current: "high",
++        available: [{ value: "high", label: "High" }],
++      },
++      mode: { current: "plan" },
++    },
++    messages: [],
++    runtime: {},
++    todos: [],
++    slashCommands: [
++      { name: "review", description: "Review", inputHint: "<path>" },
++    ],
++  };
++}
++
++class FakeBridge implements HostBridge {
++  readonly calls: Array<{ method: string; params: unknown }> = [];
++  private handler: ((event: DynamicEvent) => Promise<void> | void) | undefined;
++
++  constructor(private current: SessionSnapshot) {}
++
++  async request<Schema extends z.ZodType>(
++    method: string,
++    params: unknown,
++    resultSchema: Schema
++  ): Promise<z.output<Schema>> {
++    this.calls.push({ method, params });
++    let result: unknown = null;
++    if (method === "sendPrompt") {
++      result = { sessionId: "session-1", accepted: true };
++    } else if (method === "getTaskTokenUsage") {
++      result = {
++        sessionId: "session-1",
++        totalTokens: 12,
++        inputTokens: 5,
++        outputTokens: 7,
++        reasoningTokens: 2,
++        cacheCreationTokens: 0,
++        cacheReadTokens: 1,
++      };
++    } else if (method === "setMode") {
++      const value = params as { mode: string };
++      this.current = {
++        ...this.current,
++        settings: {
++          ...this.current.settings,
++          mode: { current: value.mode },
++        },
++      };
++      result = this.current;
++    } else if (method === "setModel" || method === "setThoughtLevel") {
++      result = this.current;
++    }
++    return resultSchema.parse(result);
++  }
++
++  async subscribe(
++    _target: {
++      workspacePath: string;
++      sessionId: string;
++      deliveryKind: "desktop-continuous";
++      includeSnapshot: boolean;
++    },
++    handler: (event: DynamicEvent) => Promise<void> | void
++  ): Promise<HostSubscription> {
++    this.calls.push({ method: "subscribe", params: null });
++    this.handler = handler;
++    return {
++      dispose: async () => {
++        this.calls.push({ method: "unsubscribe", params: null });
++        this.handler = undefined;
++      },
++    };
++  }
++
++  async close(): Promise<void> {}
++
++  async emit(event: DynamicEvent): Promise<void> {
++    if (this.handler === undefined) throw new Error("not subscribed");
++    await this.handler(event);
++  }
++}
++
++const logger: Logger = {
++  log: vi.fn(),
++  error: vi.fn(),
++};
++
++async function fixture() {
++  const workspace = await mkdtemp(join(tmpdir(), "paseo-zcode-session-"));
++  temporaryDirectories.push(workspace);
++  const initial = snapshot(workspace);
++  const bridge = new FakeBridge(initial);
++  const session = await ZCodeAgentSession.create({
++    bridge,
++    logger,
++    workspace,
++    snapshot: initial,
++    onClose: () => undefined,
++  });
++  return { workspace, bridge, session, initial };
++}
++
++afterEach(async () => {
++  await Promise.all(
++    temporaryDirectories
++      .splice(0)
++      .map((directory) => rm(directory, { recursive: true, force: true }))
++  );
++  vi.clearAllMocks();
++});
++
++describe("ZCode native session", () => {
++  it("subscribes before sending and maps streaming, tools, usage, and todo", async () => {
++    const { bridge, session, initial } = await fixture();
++    const events: unknown[] = [];
++    session.subscribe((event) => events.push(event));
++    const run = session.run("hello");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    expect(bridge.calls.map((call) => call.method).slice(0, 2)).toEqual([
++      "subscribe",
++      "sendPrompt",
++    ]);
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        seq: 0,
++        timestamp: 1,
++        deliveryKind: "desktop-continuous",
++        type: "model.streaming",
++        payload: {
++          kind: "text_delta",
++          delta: "answer",
++          assistantMessageId: "assistant-1",
++        },
++      },
++    });
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e1",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        seq: 1,
++        timestamp: 2,
++        deliveryKind: "desktop-continuous",
++        type: "tool.updated",
++        payload: {
++          kind: "started",
++          toolCallId: "tool-1",
++          toolName: "Read",
++          input: { path: "README.md" },
++        },
++      },
++    });
++    await bridge.emit({
++      type: "snapshot",
++      snapshot: {
++        ...initial,
++        todos: [
++          { content: "Implement", status: "in_progress", priority: "high" },
++        ],
++      },
++    });
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e2",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        seq: 2,
++        timestamp: 3,
++        deliveryKind: "desktop-continuous",
++        type: "tool.updated",
++        payload: {
++          kind: "result",
++          toolCallId: "tool-1",
++          toolName: "Read",
++          result: "ok",
++        },
++      },
++    });
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e3",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        seq: 3,
++        timestamp: 4,
++        deliveryKind: "desktop-continuous",
++        type: "turn.completed",
++        payload: { resultType: "success" },
++      },
++    });
++    await expect(run).resolves.toMatchObject({
++      sessionId: "session-1",
++      finalText: "answer",
++      usage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 1 },
++    });
++    expect(events).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({
++          type: "timeline",
++          item: expect.objectContaining({
++            type: "assistant_message",
++            text: "answer",
++          }),
++        }),
++        expect.objectContaining({
++          type: "timeline",
++          item: expect.objectContaining({
++            type: "todo",
++            items: [
++              expect.objectContaining({
++                text: "Implement",
++                status: "in_progress",
++                priority: "high",
++              }),
++            ],
++          }),
++        }),
++        expect.objectContaining({ type: "turn_completed" }),
++      ])
++    );
++  });
++
++  it("rejects a second prompt instead of queueing it", async () => {
++    const { bridge, session } = await fixture();
++    const first = session.run("first");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    await expect(session.run("second")).rejects.toThrow(/active turn/u);
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        seq: 0,
++        timestamp: 1,
++        deliveryKind: "desktop-continuous",
++        type: "turn.completed",
++        payload: { resultType: "success" },
++      },
++    });
++    await first;
++  });
++
++  it("publishes plan and todo independently and responds exactly once", async () => {
++    const { bridge, session, initial } = await fixture();
++    const events: unknown[] = [];
++    session.subscribe((event) => events.push(event));
++    const run = session.run("plan");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    await bridge.emit({
++      type: "snapshot",
++      snapshot: {
++        ...initial,
++        todos: [
++          { content: "Separate todo", status: "pending", priority: "medium" },
++        ],
++      },
++    });
++    await bridge.emit({
++      type: "permission.request",
++      request: {
++        requestId: "plan-request",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        toolCallId: "exit-plan",
++        toolName: "ExitPlanMode",
++        reason: "Review the plan",
++        riskLevel: "medium",
++        input: { plan: "# Native plan\n\n- Step" },
++        options: [
++          {
++            optionId: "approve-native",
++            kind: "allow_once",
++            name: "Approve",
++            response: { decision: "allow" },
++          },
++          {
++            optionId: "dismiss-native",
++            kind: "deny_once",
++            name: "Dismiss",
++            response: { decision: "deny" },
++          },
++        ],
++      },
++    });
++    const pending = session.getPendingPermissions()[0]!;
++    expect(pending).toMatchObject({
++      id: "zcode-plan:plan-request",
++      kind: "plan",
++      input: { plan: "# Native plan\n\n- Step" },
++      metadata: {
++        planText: "# Native plan\n\n- Step",
++        source: "zcode_plan_approval",
++      },
++    });
++    expect(pending).not.toHaveProperty("metadata.requestId");
++    await session.respondToPermission(pending.id, {
++      behavior: "allow",
++      selectedActionId: "approve-native",
++    });
++    expect(
++      bridge.calls.filter((call) => call.method === "respondPermission")
++    ).toEqual([
++      {
++        method: "respondPermission",
++        params: {
++          workspacePath: expect.any(String),
++          sessionId: "session-1",
++          requestId: "plan-request",
++          optionId: "approve-native",
++        },
++      },
++    ]);
++    await expect(
++      session.respondToPermission(pending.id, {
++        behavior: "allow",
++        selectedActionId: "approve-native",
++      })
++    ).rejects.toThrow(/Unknown ZCode interaction/u);
++    expect(
++      events.filter(
++        (event) =>
++          typeof event === "object" &&
++          event !== null &&
++          "type" in event &&
++          event.type === "timeline"
++      )
++    ).toEqual(
++      expect.arrayContaining([
++        expect.objectContaining({
++          item: expect.objectContaining({
++            type: "todo",
++            items: [expect.objectContaining({ text: "Separate todo" })],
++          }),
++        }),
++      ])
++    );
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        turnId: "native-turn",
++        seq: 0,
++        timestamp: 2,
++        deliveryKind: "desktop-continuous",
++        type: "turn.completed",
++        payload: { resultType: "success" },
++      },
++    });
++    await run;
++  });
++
++  it("maps question labels back to native values", async () => {
++    const { bridge, session } = await fixture();
++    const run = session.run("ask");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    await bridge.emit({
++      type: "userInput.request",
++      request: {
++        requestId: "question-1",
++        sessionId: "session-1",
++        prompt: "Choose",
++        questions: [
++          {
++            question: "Which?",
++            header: "Choice",
++            options: [{ value: "native", label: "Displayed" }],
++          },
++        ],
++      },
++    });
++    const pending = session.getPendingPermissions()[0]!;
++    await session.respondToPermission(pending.id, {
++      behavior: "allow",
++      updatedInput: { answers: { Choice: "Displayed" } },
++    });
++    expect(
++      bridge.calls.find((call) => call.method === "respondStructuredInput")
++    ).toEqual({
++      method: "respondStructuredInput",
++      params: {
++        workspacePath: expect.any(String),
++        sessionId: "session-1",
++        requestId: "question-1",
++        response: {
++          action: "accept",
++          content: {
++            answer_0: "native",
++            answer: "native",
++            answers: { "Which?": ["native"] },
++          },
++        },
++      },
++    });
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        seq: 0,
++        timestamp: 2,
++        deliveryKind: "desktop-continuous",
++        type: "turn.completed",
++        payload: { resultType: "success" },
++      },
++    });
++    await run;
++  });
++
++  it("fails closed on unknown events", async () => {
++    const { bridge, session } = await fixture();
++    const run = session.run("unknown");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        seq: 0,
++        timestamp: 1,
++        deliveryKind: "desktop-continuous",
++        type: "future.event",
++        payload: {},
++      },
++    });
++    await expect(run).rejects.toThrow(/Unsupported ZCode event/u);
++    expect(
++      bridge.calls.some((call) => call.method === "cancelGeneration")
++    ).toBe(true);
++  });
++
++  it("allows filtered sequence gaps but rejects duplicates", async () => {
++    const { bridge, session } = await fixture();
++    const run = session.run("sequence");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e1",
++        sessionId: "session-1",
++        seq: 1,
++        timestamp: 1,
++        deliveryKind: "desktop-continuous",
++        type: "session.updated",
++        payload: {},
++      },
++    });
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e3",
++        sessionId: "session-1",
++        seq: 3,
++        timestamp: 2,
++        deliveryKind: "desktop-continuous",
++        type: "session.updated",
++        payload: {},
++      },
++    });
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "duplicate-e3",
++        sessionId: "session-1",
++        seq: 3,
++        timestamp: 3,
++        deliveryKind: "desktop-continuous",
++        type: "session.updated",
++        payload: {},
++      },
++    });
++    await expect(run).rejects.toThrow(/duplicated or out of order/u);
++    expect(
++      bridge.calls.some((call) => call.method === "cancelGeneration")
++    ).toBe(true);
++  });
++
++  it("sends cancel once and waits for the terminal event", async () => {
++    const { bridge, session } = await fixture();
++    const run = session.run("cancel");
++    await vi.waitFor(() =>
++      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++        true
++      )
++    );
++    const interrupted = session.interrupt();
++    await vi.waitFor(() =>
++      expect(
++        bridge.calls.filter((call) => call.method === "cancelGeneration")
++      ).toHaveLength(1)
++    );
++    void session.interrupt();
++    await bridge.emit({
++      type: "session.event",
++      event: {
++        eventId: "e0",
++        sessionId: "session-1",
++        seq: 0,
++        timestamp: 1,
++        deliveryKind: "desktop-continuous",
++        type: "turn.completed",
++        payload: { resultType: "cancelled" },
++      },
++    });
++    await interrupted;
++    await expect(run).resolves.toMatchObject({ canceled: true });
++    expect(
++      bridge.calls.filter((call) => call.method === "cancelGeneration")
++    ).toHaveLength(1);
++  });
++});
+diff --git a/packages/server/src/server/agent/providers/zcode/agent.ts b/packages/server/src/server/agent/providers/zcode/agent.ts
+new file mode 100644
+index 0000000..0b2ab1d
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/agent.ts
+@@ -0,0 +1,1745 @@
++import { randomUUID } from "node:crypto";
++import { homedir } from "node:os";
++import { isAbsolute } from "node:path";
++import { realpath, stat } from "node:fs/promises";
++import type { Logger as PaseoLogger } from "pino";
++
++import type {
++  AgentCapabilityFlags,
++  AgentClient,
++  AgentCreateSessionOptions,
++  AgentLaunchContext,
++  AgentMode,
++  AgentPermissionAction,
++  AgentPermissionRequest,
++  AgentPermissionResponse,
++  AgentPersistenceHandle,
++  AgentPromptInput,
++  AgentRunOptions,
++  AgentRunResult,
++  AgentResumeSessionOptions,
++  AgentRuntimeInfo,
++  AgentSession,
++  AgentSessionConfig,
++  AgentSlashCommand,
++  AgentStreamEvent,
++  AgentTimelineItem,
++  AgentUsage,
++  FetchCatalogOptions,
++  ImportableProviderSession,
++  ImportProviderSessionContext,
++  ImportProviderSessionInput,
++  ImportedProviderSession,
++  ProviderCatalog,
++  ProviderRefreshContext,
++  ToolCallDetail,
++} from "../../agent-sdk-types.js";
++import {
++  assertRuntimeSupported,
++  discoverRuntime,
++  runRuntimeSmoke,
++  type DiscoveryOptions,
++} from "./discovery/discover.js";
++import type { DiscoveredRuntime } from "./discovery/types.js";
++import { AdapterError } from "./errors.js";
++import {
++  ZCodeHostBridge,
++  type HostBridge,
++  type HostSubscription,
++} from "./host/bridge.js";
++import { adaptLogger, type Logger } from "./logger.js";
++import {
++  catalogModels,
++  decodeModel,
++  encodeModel,
++  historyTimeline,
++  mapMcpServers,
++  mapPrompt,
++  mapQuestionRequest,
++  permissionActions,
++  planMarkdown,
++  questionContent,
++  record,
++  requireMode,
++  ZCODE_MODES,
++  ZCODE_PROVIDER_ID,
++  type QuestionField,
++} from "./mapping.js";
++import {
++  InitializeResultSchema,
++  SessionListSchema,
++  SessionSettingsSchema,
++  SessionSnapshotSchema,
++  SendPromptResultSchema,
++  TokenUsageSchema,
++  UnknownResultSchema,
++  WorkspaceStateResultSchema,
++  type DynamicEvent,
++  type PermissionRequest,
++  type SessionEvent,
++  type SessionSettings,
++  type SessionSnapshot,
++  type UserInputRequest,
++} from "./protocol/v1/host-schemas.js";
++
++const CAPABILITIES: AgentCapabilityFlags = {
++  supportsStreaming: true,
++  supportsSessionPersistence: true,
++  supportsSessionListing: true,
++  supportsDynamicModes: true,
++  supportsMcpServers: true,
++  supportsReasoningStream: true,
++  supportsToolInvocations: true,
++  supportsNativePaseoTools: false,
++  supportsRewindConversation: false,
++  supportsRewindFiles: false,
++  supportsRewindBoth: false,
++};
++
++const KNOWN_NOOP_EVENTS = new Set([
++  "session.updated",
++  "streamRecovery.updated",
++  "turn.started",
++  "permission.requested",
++  "permission.resolved",
++  "checkpoint.created",
++]);
++
++interface ActiveTurn {
++  id: string;
++  inputId: string;
++  nativeTurnId?: string;
++  timeline: AgentTimelineItem[];
++  finalText: string;
++  tools: Map<
++    string,
++    {
++      name: string;
++      input: unknown;
++      output: unknown;
++      status: "running" | "completed" | "failed";
++    }
++  >;
++  cancelled: boolean;
++  cancelSent: boolean;
++  settled: boolean;
++  usage?: AgentUsage;
++  completion: Promise<AgentRunResult>;
++  resolve: (result: AgentRunResult) => void;
++  reject: (error: unknown) => void;
++}
++
++interface PendingBase {
++  request: AgentPermissionRequest;
++  nativeRequestId: string;
++  turnId?: string;
++  resolved: boolean;
++}
++
++interface PendingPermission extends PendingBase {
++  source: "permission";
++  actions: Map<string, { behavior: "allow" | "deny"; optionId: string }>;
++}
++
++interface PendingQuestion extends PendingBase {
++  source: "question";
++  fields: QuestionField[];
++}
++
++interface PendingPlanQuestion extends PendingBase {
++  source: "plan-question";
++  question: string;
++  actions: Map<string, { behavior: "allow" | "deny"; value?: string }>;
++}
++
++type PendingInteraction =
++  | PendingPermission
++  | PendingQuestion
++  | PendingPlanQuestion;
++
++export class ZCodeAgentClient implements AgentClient {
++  readonly provider = ZCODE_PROVIDER_ID;
++  readonly capabilities = CAPABILITIES;
++  private readonly logger: Logger;
++  private readonly sessions = new Set<ZCodeAgentSession>();
++  private bridgePromise: Promise<ZCodeHostBridge> | undefined;
++  private shutdownStarted = false;
++
++  constructor(
++    logger: PaseoLogger,
++    private readonly discoveryOptions: DiscoveryOptions = {}
++  ) {
++    this.logger = adaptLogger(logger);
++  }
++
++  async createSession(
++    config: AgentSessionConfig,
++    _launchContext?: AgentLaunchContext,
++    _options?: AgentCreateSessionOptions
++  ): Promise<AgentSession> {
++    this.assertRunning();
++    const workspace = await resolveWorkspace(config.cwd);
++    const bridge = await this.getBridge();
++    await initializeWorkspace(bridge, workspace);
++    const snapshot = await bridge.request(
++      "createSession",
++      {
++        workspacePath: workspace,
++        persistence: "immediate",
++        mcpServers: mapMcpServers(config.mcpServers),
++      },
++      SessionSnapshotSchema,
++      60_000
++    );
++    const session = await ZCodeAgentSession.create({
++      bridge,
++      logger: this.logger,
++      workspace,
++      snapshot,
++      onClose: () => this.sessions.delete(session),
++    });
++    this.sessions.add(session);
++    await session.applyInitialConfig(config);
++    return session;
++  }
++
++  async resumeSession(
++    handle: AgentPersistenceHandle,
++    overrides?: Partial<AgentSessionConfig>,
++    _launchContext?: AgentLaunchContext,
++    _options?: AgentResumeSessionOptions
++  ): Promise<AgentSession> {
++    this.assertRunning();
++    if (
++      handle.provider !== ZCODE_PROVIDER_ID ||
++      handle.sessionId.trim() === ""
++    ) {
++      throw new AdapterError(
++        "INVALID_CONFIGURATION",
++        "Invalid ZCode persistence handle"
++      );
++    }
++    const metadataCwd =
++      typeof handle.metadata?.cwd === "string"
++        ? handle.metadata.cwd
++        : undefined;
++    const requestedCwd = overrides?.cwd ?? metadataCwd;
++    if (requestedCwd === undefined) {
++      throw new AdapterError(
++        "INVALID_WORKSPACE",
++        "ZCode resume requires the original workspace"
++      );
++    }
++    const workspace = await resolveWorkspace(requestedCwd);
++    const bridge = await this.getBridge();
++    await initializeWorkspace(bridge, workspace);
++    const snapshot = await bridge.request(
++      "resumeSession",
++      {
++        workspacePath: workspace,
++        sessionId: handle.sessionId,
++        mcpServers: mapMcpServers(overrides?.mcpServers),
++      },
++      SessionSnapshotSchema,
++      60_000
++    );
++    assertSnapshotWorkspace(snapshot, workspace);
++    const session = await ZCodeAgentSession.create({
++      bridge,
++      logger: this.logger,
++      workspace,
++      snapshot,
++      onClose: () => this.sessions.delete(session),
++    });
++    this.sessions.add(session);
++    if (overrides !== undefined) await session.applyInitialConfig(overrides);
++    return session;
++  }
++
++  async fetchCatalog(
++    options: FetchCatalogOptions,
++    context?: ProviderRefreshContext
++  ): Promise<ProviderCatalog> {
++    this.assertRunning();
++    const workspace =
++      options.scope === "workspace"
++        ? await resolveWorkspace(options.cwd)
++        : homedir();
++    const operation = async () =>
++      await this.withTemporaryBridge(async (bridge) => {
++        await initializeWorkspace(bridge, workspace);
++        const state = await bridge.request(
++          "readWorkspaceState",
++          { workspacePath: workspace },
++          WorkspaceStateResultSchema,
++          60_000
++        );
++        if (state.workspace.workspacePath !== workspace) {
++          throw new AdapterError(
++            "INVALID_WORKSPACE",
++            "ZCode returned a different catalog workspace"
++          );
++        }
++        return {
++          models: catalogModels(state.settings),
++          modes: ZCODE_MODES.map((mode) => ({ ...mode })),
++          defaultModeId: requireMode(state.settings.mode.current),
++        };
++      }, context?.signal);
++    return context === undefined
++      ? await operation()
++      : await context.runActivity("zcode-catalog", operation);
++  }
++
++  async listImportableSessions(options?: {
++    limit?: number;
++    cwd?: string;
++  }): Promise<ImportableProviderSession[]> {
++    if (options?.cwd === undefined) {
++      throw new AdapterError(
++        "INVALID_WORKSPACE",
++        "ZCode session listing requires a workspace"
++      );
++    }
++    const workspace = await resolveWorkspace(options.cwd);
++    return await this.withTemporaryBridge(async (bridge) => {
++      await initializeWorkspace(bridge, workspace);
++      const sessions = await bridge.request(
++        "listSessions",
++        { workspacePath: workspace, includeArchived: false },
++        SessionListSchema,
++        60_000
++      );
++      const limit = options.limit ?? sessions.length;
++      return sessions.slice(0, limit).map((session) => {
++        if (session.workspace.workspacePath !== workspace) {
++          throw new AdapterError(
++            "INVALID_WORKSPACE",
++            "ZCode listed a session from a different workspace"
++          );
++        }
++        return {
++          providerHandleId: session.sessionId,
++          cwd: workspace,
++          title: session.title ?? null,
++          firstPromptPreview: null,
++          lastPromptPreview: null,
++          lastActivityAt: new Date(session.updatedAt ?? 0),
++        };
++      });
++    });
++  }
++
++  async importSession(
++    input: ImportProviderSessionInput,
++    context: ImportProviderSessionContext
++  ): Promise<ImportedProviderSession> {
++    const session = await this.resumeSession(
++      {
++        provider: ZCODE_PROVIDER_ID,
++        sessionId: input.providerHandleId,
++        nativeHandle: input.providerHandleId,
++        metadata: { cwd: input.cwd },
++      },
++      { ...context.config, cwd: input.cwd },
++      context.launchContext,
++      { purpose: "history" }
++    );
++    const timeline: ImportedProviderSession["timeline"] = [];
++    for await (const event of session.streamHistory()) {
++      if (event.type === "timeline") {
++        timeline.push({
++          item: event.item,
++          ...(event.timestamp === undefined
++            ? {}
++            : { timestamp: event.timestamp }),
++        });
++      }
++    }
++    const persistence = session.describePersistence();
++    if (persistence === null) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode import lost persistence"
++      );
++    }
++    return {
++      session,
++      config: {
++        ...context.config,
++        cwd: input.cwd,
++        provider: ZCODE_PROVIDER_ID,
++      },
++      persistence,
++      timeline,
++    };
++  }
++
++  async isAvailable(signal?: AbortSignal): Promise<boolean> {
++    try {
++      const runtime = await discoverRuntime({
++        ...this.discoveryOptions,
++        signal,
++      });
++      assertRuntimeSupported(runtime);
++      return (
++        await runRuntimeSmoke(
++          runtime,
++          this.discoveryOptions.environment ?? process.env,
++          signal
++        )
++      ).passed;
++    } catch {
++      return false;
++    }
++  }
++
++  async getDiagnostic(): Promise<{ diagnostic: string }> {
++    try {
++      const runtime = await discoverRuntime(this.discoveryOptions);
++      const smoke = await runRuntimeSmoke(
++        runtime,
++        this.discoveryOptions.environment ?? process.env
++      );
++      return {
++        diagnostic: JSON.stringify({
++          available: runtime.compatibility === "supported" && smoke.passed,
++          reason: runtime.compatibilityReason,
++          appVersion: runtime.identity.appVersion,
++          cliVersion: runtime.identity.cliVersion,
++          cliIntegrity: runtime.cliIntegrity,
++          hostArtifact: runtime.resolvedHost?.artifact.id,
++          hostProtocol: runtime.resolvedHost?.protocol.id,
++          runtimeSmoke: smoke.passed ? "passed" : "failed",
++        }),
++      };
++    } catch (error) {
++      return {
++        diagnostic: JSON.stringify({
++          available: false,
++          reason: safeError(error),
++          hostArtifact: "zcode-host-3.11.2",
++          hostProtocol: "zcode-task-v1",
++          runtimeSmoke: "not-run",
++        }),
++      };
++    }
++  }
++
++  async shutdown(): Promise<void> {
++    if (this.shutdownStarted) return;
++    this.shutdownStarted = true;
++    await Promise.allSettled(
++      [...this.sessions].map((session) => session.close())
++    );
++    this.sessions.clear();
++    if (this.bridgePromise !== undefined) {
++      await (await this.bridgePromise).close();
++    }
++  }
++
++  private assertRunning(): void {
++    if (this.shutdownStarted) {
++      throw new AdapterError(
++        "NATIVE_EXITED",
++        "ZCode provider is shutting down"
++      );
++    }
++  }
++
++  private async runtime(signal?: AbortSignal): Promise<DiscoveredRuntime> {
++    const runtime = await discoverRuntime({ ...this.discoveryOptions, signal });
++    assertRuntimeSupported(runtime);
++    const smoke = await runRuntimeSmoke(
++      runtime,
++      this.discoveryOptions.environment ?? process.env,
++      signal
++    );
++    if (!smoke.passed) {
++      throw new AdapterError(
++        "RUNTIME_SMOKE_FAILED",
++        "ZCode runtime smoke failed"
++      );
++    }
++    return runtime;
++  }
++
++  private async getBridge(): Promise<ZCodeHostBridge> {
++    this.bridgePromise ??= (async () =>
++      ZCodeHostBridge.start(
++        await this.runtime(),
++        this.logger,
++        this.discoveryOptions.environment ?? process.env
++      ))();
++    return await this.bridgePromise;
++  }
++
++  private async withTemporaryBridge<T>(
++    action: (bridge: ZCodeHostBridge) => Promise<T>,
++    signal?: AbortSignal
++  ): Promise<T> {
++    const bridge = ZCodeHostBridge.start(
++      await this.runtime(signal),
++      this.logger,
++      this.discoveryOptions.environment ?? process.env
++    );
++    try {
++      return await action(bridge);
++    } finally {
++      await bridge.close();
++    }
++  }
++}
++
++export class ZCodeAgentSession implements AgentSession {
++  readonly provider = ZCODE_PROVIDER_ID;
++  readonly capabilities = CAPABILITIES;
++  readonly id: string;
++  private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
++  private readonly pending = new Map<string, PendingInteraction>();
++  private readonly history: AgentTimelineItem[];
++  private subscription!: HostSubscription;
++  private snapshot: SessionSnapshot;
++  private active: ActiveTurn | undefined;
++  private lastSequence: number | undefined;
++  private closed = false;
++
++  private constructor(
++    private readonly bridge: HostBridge,
++    private readonly logger: Logger,
++    private readonly workspace: string,
++    snapshot: SessionSnapshot,
++    private readonly onClose: () => void
++  ) {
++    assertSnapshotWorkspace(snapshot, workspace);
++    requireMode(snapshot.settings.mode.current);
++    this.snapshot = snapshot;
++    this.id = snapshot.session.sessionId;
++    this.history = historyTimeline(snapshot);
++  }
++
++  static async create(options: {
++    bridge: HostBridge;
++    logger: Logger;
++    workspace: string;
++    snapshot: SessionSnapshot;
++    onClose: () => void;
++  }): Promise<ZCodeAgentSession> {
++    const session = new ZCodeAgentSession(
++      options.bridge,
++      options.logger,
++      options.workspace,
++      options.snapshot,
++      options.onClose
++    );
++    session.subscription = await options.bridge.subscribe(
++      {
++        workspacePath: options.workspace,
++        sessionId: session.id,
++        deliveryKind: "desktop-continuous",
++        includeSnapshot: true,
++      },
++      (event) => session.handleDynamicEvent(event)
++    );
++    return session;
++  }
++
++  async applyInitialConfig(config: Partial<AgentSessionConfig>): Promise<void> {
++    if (config.model !== undefined) await this.setModel(config.model);
++    if (config.thinkingOptionId !== undefined) {
++      await this.setThinkingOption(config.thinkingOptionId);
++    }
++    if (config.modeId !== undefined) await this.setMode(config.modeId);
++  }
++
++  async run(
++    prompt: AgentPromptInput,
++    _options?: AgentRunOptions
++  ): Promise<AgentRunResult> {
++    return (await this.beginTurn(prompt)).completion;
++  }
++
++  async startTurn(
++    prompt: AgentPromptInput,
++    _options?: AgentRunOptions
++  ): Promise<{ turnId: string }> {
++    const turn = await this.beginTurn(prompt);
++    void turn.completion.catch(() => undefined);
++    return { turnId: turn.id };
++  }
++
++  subscribe(callback: (event: AgentStreamEvent) => void): () => void {
++    this.listeners.add(callback);
++    return () => this.listeners.delete(callback);
++  }
++
++  async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
++    yield {
++      type: "thread_started",
++      sessionId: this.id,
++      provider: this.provider,
++    };
++    for (const item of this.history) {
++      yield { type: "timeline", item, provider: this.provider };
++    }
++  }
++
++  async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
++    return {
++      provider: this.provider,
++      sessionId: this.id,
++      model: encodeModel(this.snapshot.settings.model.current),
++      thinkingOptionId: this.snapshot.settings.thoughtLevel.current ?? null,
++      modeId: requireMode(this.snapshot.settings.mode.current),
++      extra: { zcodeVersion: "3.11.2" },
++    };
++  }
++
++  async getAvailableModes(): Promise<AgentMode[]> {
++    return ZCODE_MODES.map((mode) => ({ ...mode }));
++  }
++
++  async getCurrentMode(): Promise<string> {
++    return requireMode(this.snapshot.settings.mode.current);
++  }
++
++  async setMode(modeId: string): Promise<void> {
++    this.assertIdle();
++    requireMode(modeId);
++    const snapshot = await this.bridge.request(
++      "setMode",
++      {
++        workspacePath: this.workspace,
++        sessionId: this.id,
++        mode: modeId,
++      },
++      SessionSnapshotSchema,
++      60_000
++    );
++    this.updateSnapshot(snapshot);
++    if (snapshot.settings.mode.current !== modeId) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode did not apply the requested mode"
++      );
++    }
++    this.emit({
++      type: "mode_changed",
++      provider: this.provider,
++      currentModeId: modeId,
++      availableModes: ZCODE_MODES.map((mode) => ({ ...mode })),
++    });
++  }
++
++  getPendingPermissions(): AgentPermissionRequest[] {
++    return [...this.pending.values()].map((entry) => entry.request);
++  }
++
++  async respondToPermission(
++    requestId: string,
++    response: AgentPermissionResponse
++  ): Promise<void> {
++    const pending = this.pending.get(requestId);
++    if (pending === undefined || pending.resolved) {
++      throw new AdapterError(
++        "SESSION_NOT_FOUND",
++        `Unknown ZCode interaction: ${requestId}`
++      );
++    }
++    pending.resolved = true;
++    this.pending.delete(requestId);
++    let nativeResponseAttempted = false;
++    try {
++      if (pending.source === "permission") {
++        if (response.selectedActionId === undefined) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "ZCode permission response requires selectedActionId"
++          );
++        }
++        const action = pending.actions.get(response.selectedActionId);
++        if (action === undefined || action.behavior !== response.behavior) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "ZCode permission response does not match the published action"
++          );
++        }
++        nativeResponseAttempted = true;
++        await this.respondPermission(pending.nativeRequestId, action.optionId);
++      } else if (pending.source === "question") {
++        const nativeResponse =
++          response.behavior === "deny"
++            ? { action: response.interrupt ? "cancel" : "decline" }
++            : {
++                action: "accept",
++                content: questionContent(
++                  pending.fields,
++                  response.updatedInput?.answers
++                ),
++              };
++        nativeResponseAttempted = true;
++        await this.respondStructuredInput(
++          pending.nativeRequestId,
++          nativeResponse
++        );
++      } else {
++        const selected =
++          response.selectedActionId === undefined
++            ? undefined
++            : pending.actions.get(response.selectedActionId);
++        if (selected === undefined || selected.behavior !== response.behavior) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "ZCode plan response does not match the published action"
++          );
++        }
++        if (selected.behavior === "deny") {
++          nativeResponseAttempted = true;
++          await this.respondStructuredInput(pending.nativeRequestId, {
++            action: "decline",
++          });
++        } else {
++          const value = selected.value;
++          if (value === undefined) {
++            throw new AdapterError(
++              "NATIVE_PROTOCOL_ERROR",
++              "ZCode plan action lost its value"
++            );
++          }
++          nativeResponseAttempted = true;
++          await this.respondStructuredInput(pending.nativeRequestId, {
++            action: "accept",
++            content: {
++              answer_0: value,
++              answer: value,
++              answers: { [pending.question]: [value] },
++            },
++          });
++        }
++      }
++    } catch (error) {
++      if (!nativeResponseAttempted) {
++        if (pending.source === "permission") {
++          const deny = [...pending.actions.values()].find(
++            (action) => action.behavior === "deny"
++          );
++          if (deny !== undefined) {
++            await this.respondPermission(
++              pending.nativeRequestId,
++              deny.optionId
++            );
++          }
++        } else {
++          await this.respondStructuredInput(pending.nativeRequestId, {
++            action: "decline",
++          });
++        }
++      }
++      throw error;
++    }
++    this.emit({
++      type: "permission_resolved",
++      provider: this.provider,
++      requestId,
++      resolution: response,
++      ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
++    });
++  }
++
++  describePersistence(): AgentPersistenceHandle {
++    return {
++      provider: this.provider,
++      sessionId: this.id,
++      nativeHandle: this.id,
++      metadata: { cwd: this.workspace },
++    };
++  }
++
++  async interrupt(): Promise<void> {
++    const active = this.active;
++    if (active === undefined) return;
++    if (!active.cancelSent) {
++      active.cancelSent = true;
++      active.cancelled = true;
++      await this.cancelPending(true);
++      await this.bridge.request(
++        "cancelGeneration",
++        { workspacePath: this.workspace, sessionId: this.id },
++        UnknownResultSchema
++      );
++    }
++    await active.completion.catch(() => undefined);
++  }
++
++  async close(): Promise<void> {
++    if (this.closed) return;
++    this.closed = true;
++    try {
++      await this.interrupt();
++      await this.cancelPending(true);
++      await this.bridge.request(
++        "closeSession",
++        { workspacePath: this.workspace, sessionId: this.id },
++        UnknownResultSchema
++      );
++      await this.subscription.dispose();
++    } finally {
++      this.listeners.clear();
++      this.onClose();
++    }
++  }
++
++  async listCommands(): Promise<AgentSlashCommand[]> {
++    return this.snapshot.slashCommands.map((command) => ({
++      name: command.name,
++      description: command.description,
++      argumentHint: command.inputHint ?? "",
++    }));
++  }
++
++  async setModel(modelId: string | null): Promise<void> {
++    this.assertIdle();
++    if (modelId === null) {
++      throw new AdapterError(
++        "INVALID_CONFIGURATION",
++        "ZCode model cannot be cleared"
++      );
++    }
++    const model = decodeModel(modelId);
++    const available = new Set(
++      this.snapshot.settings.model.available.map((entry) =>
++        encodeModel(entry.ref)
++      )
++    );
++    if (!available.has(modelId)) {
++      throw new AdapterError(
++        "INVALID_CONFIGURATION",
++        `Unknown ZCode model: ${modelId}`
++      );
++    }
++    const snapshot = await this.bridge.request(
++      "setModel",
++      {
++        workspacePath: this.workspace,
++        sessionId: this.id,
++        model,
++        persistAsWorkspaceLastUsed: true,
++      },
++      SessionSnapshotSchema,
++      60_000
++    );
++    this.updateSnapshot(snapshot);
++    if (encodeModel(snapshot.settings.model.current) !== modelId) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode did not apply the requested model"
++      );
++    }
++    this.emit({
++      type: "model_changed",
++      provider: this.provider,
++      runtimeInfo: await this.getRuntimeInfo(),
++    });
++  }
++
++  async setThinkingOption(thinkingOptionId: string | null): Promise<void> {
++    this.assertIdle();
++    if (
++      thinkingOptionId === null ||
++      !this.snapshot.settings.thoughtLevel.enabled ||
++      !this.snapshot.settings.thoughtLevel.available.some(
++        (entry) => entry.value === thinkingOptionId
++      )
++    ) {
++      throw new AdapterError(
++        "INVALID_CONFIGURATION",
++        `Unknown ZCode thinking option: ${String(thinkingOptionId)}`
++      );
++    }
++    const snapshot = await this.bridge.request(
++      "setThoughtLevel",
++      {
++        workspacePath: this.workspace,
++        sessionId: this.id,
++        thoughtLevel: thinkingOptionId,
++        persistAsWorkspaceLastUsed: true,
++      },
++      SessionSnapshotSchema,
++      60_000
++    );
++    this.updateSnapshot(snapshot);
++    if (snapshot.settings.thoughtLevel.current !== thinkingOptionId) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode did not apply the requested thinking option"
++      );
++    }
++    this.emit({
++      type: "thinking_option_changed",
++      provider: this.provider,
++      thinkingOptionId,
++    });
++  }
++
++  private async beginTurn(prompt: AgentPromptInput): Promise<ActiveTurn> {
++    this.assertOpen();
++    if (this.active !== undefined) {
++      throw new AdapterError(
++        "SESSION_BUSY",
++        "ZCode session already has an active turn"
++      );
++    }
++    const nativePrompt = await mapPrompt(prompt, this.workspace);
++    const id = randomUUID();
++    let resolve!: (result: AgentRunResult) => void;
++    let reject!: (error: unknown) => void;
++    const completion = new Promise<AgentRunResult>((ok, fail) => {
++      resolve = ok;
++      reject = fail;
++    });
++    const active: ActiveTurn = {
++      id,
++      inputId: id,
++      timeline: [],
++      finalText: "",
++      tools: new Map(),
++      cancelled: false,
++      cancelSent: false,
++      settled: false,
++      completion,
++      resolve,
++      reject,
++    };
++    this.active = active;
++    this.emit({ type: "turn_started", provider: this.provider, turnId: id });
++    const userItem: AgentTimelineItem = {
++      type: "user_message",
++      text: nativePrompt.content,
++      messageId: id,
++    };
++    this.pushTimeline(active, userItem);
++    try {
++      await this.bridge.request(
++        "sendPrompt",
++        {
++          workspacePath: this.workspace,
++          sessionId: this.id,
++          inputId: active.inputId,
++          content: nativePrompt.content,
++          attachments: nativePrompt.attachments,
++        },
++        SendPromptResultSchema,
++        60_000,
++        { sessionId: this.id, inputId: active.inputId }
++      );
++      return active;
++    } catch (error) {
++      this.failActive(error);
++      throw error;
++    }
++  }
++
++  private async handleDynamicEvent(dynamic: DynamicEvent): Promise<void> {
++    try {
++      if (dynamic.type === "snapshot") {
++        this.updateSnapshot(dynamic.snapshot);
++        this.publishTodos(dynamic.snapshot);
++        return;
++      }
++      if (
++        dynamic.type === "state.updated" ||
++        dynamic.type === "userInput.response"
++      )
++        return;
++      if (dynamic.type === "providerRuntimeHeaders.request") {
++        await this.bridge.request(
++          "respondProviderRuntimeHeaders",
++          {
++            workspacePath: this.workspace,
++            sessionId: this.id,
++            requestId: dynamic.request.requestId,
++            response: {
++              headersApplied: false,
++              errorMessage:
++                "Interactive provider header recovery is unavailable",
++            },
++          },
++          UnknownResultSchema
++        );
++        throw new AdapterError(
++          "INTERACTION_UNSUPPORTED",
++          "ZCode requested interactive provider header recovery"
++        );
++      }
++      if (dynamic.type === "permission.request") {
++        await this.handlePermission(dynamic.request);
++        return;
++      }
++      if (dynamic.type === "userInput.request") {
++        await this.handleUserInput(dynamic.request);
++        return;
++      }
++      await this.handleSessionEvent(dynamic.event);
++    } catch (error) {
++      const active = this.active;
++      if (active !== undefined && !active.cancelSent) {
++        active.cancelSent = true;
++        void this.bridge
++          .request(
++            "cancelGeneration",
++            { workspacePath: this.workspace, sessionId: this.id },
++            UnknownResultSchema
++          )
++          .catch((cancelError) => {
++            this.logger.error(
++              "zcode.turn.cancel_after_failure_failed",
++              cancelError,
++              {
++                sessionId: this.id,
++              }
++            );
++          });
++      }
++      this.failActive(error);
++      if (active === undefined) {
++        this.logger.error("zcode.event.outside_turn_failed", error, {
++          sessionId: this.id,
++        });
++        this.closed = true;
++        void this.bridge
++          .request(
++            "closeSession",
++            { workspacePath: this.workspace, sessionId: this.id },
++            UnknownResultSchema
++          )
++          .catch((closeError) => {
++            this.logger.error(
++              "zcode.session.close_after_failure_failed",
++              closeError,
++              {
++                sessionId: this.id,
++              }
++            );
++          });
++      }
++    }
++  }
++
++  private async handleSessionEvent(event: SessionEvent): Promise<void> {
++    if (event.sessionId !== this.id) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode event belongs to another session"
++      );
++    }
++    if (this.lastSequence !== undefined && event.seq <= this.lastSequence) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode event sequence is duplicated or out of order"
++      );
++    }
++    this.lastSequence = event.seq;
++    const active = this.active;
++    if (event.type === "session.titleUpdated") return;
++    if (KNOWN_NOOP_EVENTS.has(event.type)) return;
++    if (active === undefined) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode emitted a turn event while idle"
++      );
++    }
++    if (event.turnId !== undefined) {
++      active.nativeTurnId ??= event.turnId;
++      if (active.nativeTurnId !== event.turnId) {
++        throw new AdapterError(
++          "NATIVE_PROTOCOL_ERROR",
++          "ZCode event turn ID changed"
++        );
++      }
++    }
++    if (event.type === "model.streaming") {
++      this.handleStreaming(active, event.payload);
++      return;
++    }
++    if (event.type === "tool.updated") {
++      this.handleTool(active, event.payload);
++      return;
++    }
++    if (event.type === "turn.completed") {
++      await this.completeActive(event.payload);
++      return;
++    }
++    if (event.type === "turn.failed") {
++      if (active.cancelled) {
++        this.finishCancelled(active);
++      } else {
++        this.failActive(
++          new AdapterError("NATIVE_PROTOCOL_ERROR", "ZCode turn failed")
++        );
++      }
++      return;
++    }
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      `Unsupported ZCode event: ${event.type}`
++    );
++  }
++
++  private handleStreaming(
++    active: ActiveTurn,
++    payload: Record<string, unknown>
++  ): void {
++    const kind = typeof payload.kind === "string" ? payload.kind : undefined;
++    const delta = typeof payload.delta === "string" ? payload.delta : "";
++    if (kind === "text_delta" || kind === "reasoning_delta") {
++      if (delta === "") return;
++      const item: AgentTimelineItem =
++        kind === "text_delta"
++          ? {
++              type: "assistant_message",
++              text: delta,
++              ...(typeof payload.assistantMessageId === "string"
++                ? { messageId: payload.assistantMessageId }
++                : {}),
++            }
++          : { type: "reasoning", text: delta };
++      if (kind === "text_delta") active.finalText += delta;
++      this.pushTimeline(active, item);
++      return;
++    }
++    const callId =
++      typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
++    if (callId === undefined) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode tool stream has no ID"
++      );
++    }
++    const tool = active.tools.get(callId) ?? {
++      name: typeof payload.toolName === "string" ? payload.toolName : "tool",
++      input: null,
++      output: null,
++      status: "running" as const,
++    };
++    active.tools.set(callId, tool);
++    if (
++      kind === "tool_input_start" ||
++      kind === "tool_input_delta" ||
++      kind === "tool_input_end"
++    ) {
++      return;
++    }
++    if (kind === "tool_call") {
++      tool.input = payload.input;
++      this.pushTool(active, callId, tool);
++      return;
++    }
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      `Unsupported ZCode stream kind: ${String(kind)}`
++    );
++  }
++
++  private handleTool(
++    active: ActiveTurn,
++    payload: Record<string, unknown>
++  ): void {
++    const kind = typeof payload.kind === "string" ? payload.kind : undefined;
++    if (kind === "batch") return;
++    const callId =
++      typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
++    if (callId === undefined) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode tool update has no ID"
++      );
++    }
++    const tool = active.tools.get(callId) ?? {
++      name: typeof payload.toolName === "string" ? payload.toolName : "tool",
++      input: payload.input,
++      output: null,
++      status: "running" as const,
++    };
++    active.tools.set(callId, tool);
++    if (kind === "scheduled" || kind === "started" || kind === "progress") {
++      if (tool.status !== "running") {
++        throw new AdapterError(
++          "NATIVE_PROTOCOL_ERROR",
++          "Invalid ZCode tool transition"
++        );
++      }
++      this.pushTool(active, callId, tool);
++      return;
++    }
++    if (tool.status !== "running") {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "Duplicate ZCode tool terminal event"
++      );
++    }
++    if (kind === "result") {
++      tool.status = "completed";
++      tool.output = payload.result;
++      this.pushTool(active, callId, tool);
++      return;
++    }
++    if (kind === "error") {
++      tool.status = "failed";
++      tool.output = payload.error;
++      this.pushTool(active, callId, tool);
++      return;
++    }
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      `Unsupported ZCode tool update: ${String(kind)}`
++    );
++  }
++
++  private pushTool(
++    active: ActiveTurn,
++    callId: string,
++    tool: {
++      name: string;
++      input: unknown;
++      output: unknown;
++      status: "running" | "completed" | "failed";
++    }
++  ): void {
++    const detail: ToolCallDetail = {
++      type: "unknown",
++      input: tool.input,
++      output: tool.output,
++    };
++    const item: AgentTimelineItem =
++      tool.status === "failed"
++        ? {
++            type: "tool_call",
++            callId,
++            name: tool.name,
++            detail,
++            status: "failed",
++            error: tool.output,
++          }
++        : {
++            type: "tool_call",
++            callId,
++            name: tool.name,
++            detail,
++            status: tool.status,
++            error: null,
++          };
++    this.pushTimeline(active, item);
++  }
++
++  private async completeActive(
++    payload: Record<string, unknown>
++  ): Promise<void> {
++    const active = this.active;
++    if (active === undefined) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode completed an absent turn"
++      );
++    }
++    const resultType = payload.resultType;
++    const accepted = new Set([
++      "success",
++      "max_tokens",
++      "token_limit",
++      "max_turn_requests",
++      "request_limit",
++      "refusal",
++      "cancelled",
++      "interrupted",
++      "stopped",
++    ]);
++    if (typeof resultType !== "string" || !accepted.has(resultType)) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Unsupported ZCode terminal result: ${String(resultType)}`
++      );
++    }
++    await this.cancelPending(true);
++    const nativeUsage = await this.bridge.request(
++      "getTaskTokenUsage",
++      { workspacePath: this.workspace, sessionId: this.id },
++      TokenUsageSchema
++    );
++    active.usage = {
++      inputTokens: nativeUsage.inputTokens,
++      cachedInputTokens: nativeUsage.cacheReadTokens,
++      outputTokens: nativeUsage.outputTokens,
++      contextWindowUsedTokens: nativeUsage.totalTokens,
++    };
++    const cancelled =
++      active.cancelled ||
++      resultType === "cancelled" ||
++      resultType === "interrupted" ||
++      resultType === "stopped";
++    if (cancelled) {
++      this.finishCancelled(active);
++      return;
++    }
++    this.emit({
++      type: "usage_updated",
++      provider: this.provider,
++      usage: active.usage,
++      turnId: active.id,
++    });
++    this.emit({
++      type: "turn_completed",
++      provider: this.provider,
++      usage: active.usage,
++      turnId: active.id,
++    });
++    this.settle(active, {
++      sessionId: this.id,
++      finalText: active.finalText,
++      timeline: active.timeline,
++      usage: active.usage,
++    });
++  }
++
++  private finishCancelled(active: ActiveTurn): void {
++    this.emit({
++      type: "turn_canceled",
++      provider: this.provider,
++      reason: "cancelled",
++      turnId: active.id,
++    });
++    this.settle(active, {
++      sessionId: this.id,
++      finalText: active.finalText,
++      timeline: active.timeline,
++      ...(active.usage === undefined ? {} : { usage: active.usage }),
++      canceled: true,
++    });
++  }
++
++  private failActive(error: unknown): void {
++    const active = this.active;
++    if (active === undefined || active.settled) return;
++    const message = safeError(error);
++    this.emit({
++      type: "turn_failed",
++      provider: this.provider,
++      error: message,
++      code:
++        error instanceof AdapterError ? error.code : "NATIVE_PROTOCOL_ERROR",
++      turnId: active.id,
++    });
++    active.settled = true;
++    this.active = undefined;
++    active.reject(error);
++  }
++
++  private settle(active: ActiveTurn, result: AgentRunResult): void {
++    if (active.settled) return;
++    active.settled = true;
++    if (this.active === active) this.active = undefined;
++    active.resolve(result);
++  }
++
++  private async handlePermission(request: PermissionRequest): Promise<void> {
++    if (request.sessionId !== this.id) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "Permission belongs to another session"
++      );
++    }
++    const active = this.requireActive();
++    try {
++      const actions = permissionActions(
++        request,
++        request.toolName === "ExitPlanMode"
++      );
++      const markdown =
++        request.toolName === "ExitPlanMode"
++          ? planMarkdown(request.input)
++          : undefined;
++      const id =
++        markdown === undefined
++          ? `zcode-permission:${request.requestId}`
++          : `zcode-plan:${request.requestId}`;
++      const mapped: AgentPermissionRequest = {
++        id,
++        provider: this.provider,
++        name: markdown === undefined ? request.toolName : "ZCodePlanApproval",
++        kind: markdown === undefined ? "tool" : "plan",
++        title: markdown === undefined ? request.toolName : "Plan",
++        description: request.reason,
++        input:
++          markdown === undefined ? record(request.input) : { plan: markdown },
++        actions,
++        ...(markdown === undefined
++          ? {
++              detail: {
++                type: "unknown",
++                input: request.input,
++                output: null,
++              },
++            }
++          : {
++              metadata: {
++                planText: markdown,
++                source: "zcode_plan_approval",
++              },
++            }),
++      };
++      this.addPending({
++        source: "permission",
++        request: mapped,
++        nativeRequestId: request.requestId,
++        turnId: active.id,
++        resolved: false,
++        actions: new Map(
++          actions.map((action) => [
++            action.id,
++            { behavior: action.behavior, optionId: action.id },
++          ])
++        ),
++      });
++    } catch (error) {
++      const deny = request.options.find(
++        (option) => option.response.decision === "deny"
++      );
++      if (deny !== undefined)
++        await this.respondPermission(request.requestId, deny.optionId);
++      throw error;
++    }
++  }
++
++  private async handleUserInput(request: UserInputRequest): Promise<void> {
++    if (request.sessionId !== this.id) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "Question belongs to another session"
++      );
++    }
++    const active = this.requireActive();
++    const isPlan = record(request.schema).interaction === "plan_approval";
++    try {
++      if (!isPlan) {
++        const id = `zcode-question:${request.requestId}`;
++        const mapped = mapQuestionRequest(request, id);
++        this.addPending({
++          source: "question",
++          request: mapped.request,
++          nativeRequestId: request.requestId,
++          turnId: active.id,
++          resolved: false,
++          fields: mapped.fields,
++        });
++        return;
++      }
++      const markdown = planMarkdown(request.input);
++      const question = request.questions?.[0];
++      if (
++        request.questions?.length !== 1 ||
++        question === undefined ||
++        question.multiSelect === true ||
++        question.options.length === 0
++      ) {
++        throw new AdapterError(
++          "NATIVE_PROTOCOL_ERROR",
++          "ZCode plan question must be a single-select field"
++        );
++      }
++      const seen = new Set<string>();
++      const actions = new Map<
++        string,
++        { behavior: "allow" | "deny"; value?: string }
++      >();
++      const mappedActions: AgentPermissionAction[] = question.options.map(
++        (option) => {
++          if (
++            option.value === "" ||
++            option.label === "" ||
++            seen.has(option.value)
++          ) {
++            throw new AdapterError(
++              "NATIVE_PROTOCOL_ERROR",
++              "ZCode plan options are ambiguous"
++            );
++          }
++          seen.add(option.value);
++          actions.set(option.value, { behavior: "allow", value: option.value });
++          return {
++            id: option.value,
++            label: option.label,
++            behavior: "allow" as const,
++            variant: "primary" as const,
++            intent: "implement" as const,
++          };
++        }
++      );
++      const dismissId = `zcode-plan-dismiss:${request.requestId}`;
++      actions.set(dismissId, { behavior: "deny" });
++      mappedActions.push({
++        id: dismissId,
++        label: "Dismiss",
++        behavior: "deny",
++        variant: "danger",
++        intent: "dismiss",
++      });
++      const id = `zcode-plan:${request.requestId}`;
++      this.addPending({
++        source: "plan-question",
++        nativeRequestId: request.requestId,
++        turnId: active.id,
++        resolved: false,
++        question: question.question,
++        actions,
++        request: {
++          id,
++          provider: this.provider,
++          name: "ZCodePlanApproval",
++          kind: "plan",
++          title: "Plan",
++          description: request.prompt ?? question.question,
++          input: { plan: markdown },
++          actions: mappedActions,
++          metadata: {
++            planText: markdown,
++            source: "zcode_plan_approval",
++          },
++        },
++      });
++    } catch (error) {
++      await this.respondStructuredInput(request.requestId, {
++        action: "decline",
++        reason: "Unsupported ZCode interaction",
++      });
++      throw error;
++    }
++  }
++
++  private addPending(pending: PendingInteraction): void {
++    if (this.pending.has(pending.request.id)) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "Duplicate ZCode interaction ID"
++      );
++    }
++    this.pending.set(pending.request.id, pending);
++    this.emit({
++      type: "permission_requested",
++      provider: this.provider,
++      request: pending.request,
++      ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
++    });
++  }
++
++  private async cancelPending(cancel: boolean): Promise<void> {
++    const entries = [...this.pending.entries()];
++    this.pending.clear();
++    for (const [id, pending] of entries) {
++      if (pending.resolved) continue;
++      pending.resolved = true;
++      try {
++        if (pending.source === "permission") {
++          const deny = [...pending.actions.values()].find(
++            (action) => action.behavior === "deny"
++          );
++          if (deny === undefined) {
++            throw new AdapterError(
++              "NATIVE_PROTOCOL_ERROR",
++              "Pending permission has no deny action"
++            );
++          }
++          await this.respondPermission(pending.nativeRequestId, deny.optionId);
++        } else {
++          await this.respondStructuredInput(pending.nativeRequestId, {
++            action: cancel ? "cancel" : "decline",
++          });
++        }
++        this.emit({
++          type: "permission_resolved",
++          provider: this.provider,
++          requestId: id,
++          resolution: { behavior: "deny", interrupt: cancel },
++          ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
++        });
++      } catch (error) {
++        this.logger.error("zcode.interaction.cleanup_failed", error, {
++          sessionId: this.id,
++        });
++      }
++    }
++  }
++
++  private respondPermission(
++    nativeRequestId: string,
++    optionId: string
++  ): Promise<unknown> {
++    return this.bridge.request(
++      "respondPermission",
++      {
++        workspacePath: this.workspace,
++        sessionId: this.id,
++        requestId: nativeRequestId,
++        optionId,
++      },
++      UnknownResultSchema
++    );
++  }
++
++  private respondStructuredInput(
++    nativeRequestId: string,
++    response: Record<string, unknown>
++  ): Promise<unknown> {
++    return this.bridge.request(
++      "respondStructuredInput",
++      {
++        workspacePath: this.workspace,
++        sessionId: this.id,
++        requestId: nativeRequestId,
++        response,
++      },
++      UnknownResultSchema
++    );
++  }
++
++  private publishTodos(snapshot: SessionSnapshot): void {
++    const items = snapshot.todos ?? [];
++    const timeline: AgentTimelineItem = {
++      type: "todo",
++      items: items.map((todo) =>
++        Object.assign(
++          {
++            text: todo.content,
++            completed: todo.status === "completed",
++            status: todo.status,
++          },
++          { priority: todo.priority }
++        )
++      ),
++    };
++    const active = this.active;
++    if (active === undefined) {
++      this.emit({ type: "timeline", provider: this.provider, item: timeline });
++    } else {
++      this.pushTimeline(active, timeline);
++    }
++  }
++
++  private updateSnapshot(snapshot: SessionSnapshot): void {
++    assertSnapshotWorkspace(snapshot, this.workspace);
++    requireMode(snapshot.settings.mode.current);
++    this.snapshot = snapshot;
++  }
++
++  private pushTimeline(active: ActiveTurn, item: AgentTimelineItem): void {
++    active.timeline.push(item);
++    this.history.push(item);
++    this.emit({
++      type: "timeline",
++      provider: this.provider,
++      item,
++      turnId: active.id,
++    });
++  }
++
++  private emit(event: AgentStreamEvent): void {
++    for (const listener of this.listeners) listener(event);
++  }
++
++  private requireActive(): ActiveTurn {
++    if (this.active === undefined) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode interaction has no active turn"
++      );
++    }
++    return this.active;
++  }
++
++  private assertOpen(): void {
++    if (this.closed)
++      throw new AdapterError("NATIVE_EXITED", "ZCode session is closed");
++  }
++
++  private assertIdle(): void {
++    this.assertOpen();
++    if (this.active !== undefined) {
++      throw new AdapterError(
++        "SESSION_BUSY",
++        "ZCode session has an active turn"
++      );
++    }
++  }
++}
++
++async function resolveWorkspace(cwd: string): Promise<string> {
++  if (!isAbsolute(cwd)) {
++    throw new AdapterError(
++      "INVALID_WORKSPACE",
++      "Workspace path must be absolute"
++    );
++  }
++  const info = await stat(cwd);
++  if (!info.isDirectory()) {
++    throw new AdapterError(
++      "INVALID_WORKSPACE",
++      "Workspace path must be a directory"
++    );
++  }
++  return await realpath(cwd);
++}
++
++function assertSnapshotWorkspace(
++  snapshot: SessionSnapshot,
++  workspace: string
++): void {
++  if (snapshot.session.workspace.workspacePath !== workspace) {
++    throw new AdapterError(
++      "INVALID_WORKSPACE",
++      "ZCode session belongs to another workspace"
++    );
++  }
++}
++
++async function initializeWorkspace(
++  bridge: HostBridge,
++  workspace: string
++): Promise<SessionSettings> {
++  const initialized = await bridge.request(
++    "initialize",
++    { workspacePath: workspace },
++    InitializeResultSchema,
++    60_000
++  );
++  if (!initialized.available) {
++    throw new AdapterError(
++      initialized.reasonCode === "provider_not_ready"
++        ? "AUTH_REQUIRED"
++        : "NATIVE_PROTOCOL_ERROR",
++      initialized.reason ?? "ZCode host is unavailable"
++    );
++  }
++  const state = await bridge.request(
++    "readWorkspaceState",
++    { workspacePath: workspace },
++    WorkspaceStateResultSchema,
++    60_000
++  );
++  if (state.workspace.workspacePath !== workspace) {
++    throw new AdapterError(
++      "INVALID_WORKSPACE",
++      "ZCode initialized a different workspace"
++    );
++  }
++  if ((state.modelCatalog?.providers.length ?? 0) === 0) {
++    throw new AdapterError(
++      "AUTH_REQUIRED",
++      "No usable ZCode model provider is configured"
++    );
++  }
++  SessionSettingsSchema.parse(state.settings);
++  return state.settings;
++}
++
++function safeError(error: unknown): string {
++  if (error instanceof AdapterError) return `${error.code}: ${error.message}`;
++  return "ZCode provider operation failed";
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/discovery/discover.ts b/packages/server/src/server/agent/providers/zcode/discovery/discover.ts
+new file mode 100644
+index 0000000..d4bb471
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/discovery/discover.ts
+@@ -0,0 +1,392 @@
++import { spawn } from "node:child_process";
++import { access, constants, readFile, realpath, stat } from "node:fs/promises";
++import { createHash } from "node:crypto";
++import { dirname, isAbsolute, join, relative } from "node:path";
++import { z } from "zod";
++
++import { AdapterError } from "../errors.js";
++import {
++  resolvedHostMismatch,
++  resolveHostContractPaths,
++} from "./host-contract.js";
++import { assessCompatibility } from "./manifest.js";
++import type {
++  BundleMetadata,
++  DiscoveredRuntime,
++  HostArtifactDescriptor,
++  HostProtocolDescriptor,
++  RuntimePaths,
++  RuntimeSmokeResult,
++} from "./types.js";
++
++const BundleMetadataSchema = z
++  .object({
++    runtime: z.literal("electron-node"),
++    entry: z.literal("zcode.cjs"),
++    platform: z.literal("darwin-arm64"),
++    source: z.literal("apps/zcode-cli/packages/cli/dist/zcode.cjs"),
++  })
++  .strict();
++
++const HostInspectionSchema = z
++  .object({
++    hostIndexSha256: z.string().regex(/^[0-9a-f]{64}$/u),
++    hostRpcModuleSha256: z.string().regex(/^[0-9a-f]{64}$/u),
++    exports: z.array(z.string()),
++  })
++  .strict();
++
++export interface DiscoveryOptions {
++  readonly installRoot?: string;
++  readonly environment?: NodeJS.ProcessEnv;
++  readonly platform?: NodeJS.Platform;
++  readonly architecture?: string;
++  readonly signal?: AbortSignal;
++}
++
++interface CommandResult {
++  exitCode: number;
++  stdout: string;
++}
++
++const INSPECTION_TIMEOUT_MS = 60_000;
++
++async function run(
++  command: string,
++  args: readonly string[],
++  options: { cwd: string; environment: NodeJS.ProcessEnv; signal?: AbortSignal }
++): Promise<CommandResult> {
++  return await new Promise((resolve, reject) => {
++    const child = spawn(command, [...args], {
++      cwd: options.cwd,
++      env: options.environment,
++      signal: options.signal,
++      timeout: INSPECTION_TIMEOUT_MS,
++      killSignal: "SIGTERM",
++      stdio: ["ignore", "pipe", "pipe"],
++    });
++    let stdout = "";
++    let stderrBytes = 0;
++    child.stdout.setEncoding("utf8");
++    child.stdout.on("data", (chunk: string) => {
++      if (stdout.length + chunk.length > 1024 * 1024) {
++        child.kill("SIGTERM");
++        reject(
++          new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "ZCode inspection output is too large"
++          )
++        );
++        return;
++      }
++      stdout += chunk;
++    });
++    child.stderr.on("data", (chunk: Buffer) => {
++      stderrBytes += chunk.byteLength;
++    });
++    child.once("error", reject);
++    child.once("exit", (code, signal) => {
++      if (signal !== null) {
++        reject(
++          new AdapterError(
++            "NATIVE_EXITED",
++            `ZCode runtime terminated by ${signal}`
++          )
++        );
++        return;
++      }
++      resolve({ exitCode: code ?? -1, stdout });
++    });
++  });
++}
++
++export async function discoverRuntime(
++  options: DiscoveryOptions = {}
++): Promise<DiscoveredRuntime> {
++  const platform = options.platform ?? process.platform;
++  const architecture = options.architecture ?? process.arch;
++  if (platform !== "darwin" || architecture !== "arm64") {
++    throw new AdapterError(
++      "UNSUPPORTED_PLATFORM",
++      "ZCode supports only darwin-arm64"
++    );
++  }
++  const configuredRoot = options.installRoot ?? "/Applications/ZCode.app";
++  if (!isAbsolute(configuredRoot)) {
++    throw new AdapterError(
++      "INVALID_CONFIGURATION",
++      "ZCode install root must be absolute"
++    );
++  }
++  let installRoot: string;
++  try {
++    installRoot = await realpath(configuredRoot);
++  } catch (error) {
++    throw new AdapterError(
++      "RUNTIME_DISCOVERY_FAILED",
++      "ZCode install root does not exist",
++      {},
++      { cause: error }
++    );
++  }
++  const paths = resolveRuntimePaths(installRoot);
++  await validatePaths(paths);
++  const metadataValue: unknown = JSON.parse(
++    await readFile(paths.metadata, "utf8")
++  );
++  const bundle = BundleMetadataSchema.parse(metadataValue) as BundleMetadata;
++  const environment = {
++    ...(options.environment ?? process.env),
++    ELECTRON_RUN_AS_NODE: "1",
++  };
++  const [appVersion, cliSha256, metadataSha256, cliResult] = await Promise.all([
++    readPlist(paths.appMetadata!, "CFBundleShortVersionString", options.signal),
++    sha256(paths.cliEntry),
++    sha256(paths.metadata),
++    run(paths.executable, [paths.cliEntry, "version"], {
++      cwd: installRoot,
++      environment,
++      ...(options.signal === undefined ? {} : { signal: options.signal }),
++    }),
++  ]);
++  const cliVersion =
++    cliResult.exitCode === 0
++      ? cliResult.stdout.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0]
++      : undefined;
++  const identity = {
++    platform: "darwin-arm64",
++    appVersion,
++    ...(cliVersion === undefined ? {} : { cliVersion }),
++    cliSha256,
++    metadataSha256,
++    bundle,
++  };
++  const assessment = assessCompatibility(identity);
++  const host =
++    assessment.hostArtifact === undefined ||
++    assessment.hostProtocol === undefined
++      ? undefined
++      : await resolveHost(
++          paths,
++          assessment.hostArtifact,
++          assessment.hostProtocol,
++          environment,
++          options.signal
++        );
++  const mismatch =
++    host === undefined
++      ? undefined
++      : resolvedHostMismatch(host.artifact, host.protocol, {
++          hostIndexSha256: host.hostIndexSha256,
++          hostRpcModuleSha256: host.hostRpcModuleSha256,
++          exports: host.rpcExports,
++        });
++  const rootStat = await stat(installRoot);
++  return {
++    paths,
++    identity,
++    ...(assessment.expectedCliSha256 === undefined
++      ? {}
++      : { expectedCliSha256: assessment.expectedCliSha256 }),
++    ...(assessment.cliIntegrity === undefined
++      ? {}
++      : { cliIntegrity: assessment.cliIntegrity }),
++    ...(host === undefined ? {} : { resolvedHost: host }),
++    compatibility: mismatch === undefined ? assessment.status : "unsupported",
++    compatibilityReason: mismatch ?? assessment.reason,
++    writableInstallRoot: (rootStat.mode & 0o022) !== 0,
++  };
++}
++
++export async function runRuntimeSmoke(
++  runtime: DiscoveredRuntime,
++  environment: NodeJS.ProcessEnv = process.env,
++  signal?: AbortSignal
++): Promise<RuntimeSmokeResult> {
++  try {
++    const commandEnvironment = { ...environment, ELECTRON_RUN_AS_NODE: "1" };
++    const [version, doctor] = await Promise.all([
++      run(runtime.paths.executable, [runtime.paths.cliEntry, "version"], {
++        cwd: runtime.paths.installRoot,
++        environment: commandEnvironment,
++        ...(signal === undefined ? {} : { signal }),
++      }),
++      run(
++        runtime.paths.executable,
++        [runtime.paths.cliEntry, "doctor", "--json"],
++        {
++          cwd: runtime.paths.installRoot,
++          environment: commandEnvironment,
++          ...(signal === undefined ? {} : { signal }),
++        }
++      ),
++    ]);
++    return {
++      passed: version.exitCode === 0 && doctor.exitCode === 0,
++      ...(runtime.identity.cliVersion === undefined
++        ? {}
++        : { cliVersion: runtime.identity.cliVersion }),
++      doctorPassed: doctor.exitCode === 0,
++      authentication: "unknown",
++      ...(version.exitCode === 0 && doctor.exitCode === 0
++        ? {}
++        : { error: "Bundled version or doctor command failed" }),
++    };
++  } catch (error) {
++    return {
++      passed: false,
++      doctorPassed: false,
++      authentication: "unknown",
++      error: error instanceof Error ? error.message : "Runtime smoke failed",
++    };
++  }
++}
++
++export function assertRuntimeSupported(runtime: DiscoveredRuntime): void {
++  if (runtime.compatibility !== "supported") {
++    throw new AdapterError("UNSUPPORTED_ZCODE", runtime.compatibilityReason, {
++      platform: runtime.identity.platform,
++      appVersion: runtime.identity.appVersion,
++      cliVersion: runtime.identity.cliVersion,
++      hostArtifact: runtime.resolvedHost?.artifact.id,
++      hostProtocol: runtime.resolvedHost?.protocol.id,
++    });
++  }
++}
++
++function resolveRuntimePaths(installRoot: string): RuntimePaths {
++  return {
++    installRoot,
++    executable: join(
++      installRoot,
++      "Contents/Frameworks/ZCode Helper.app/Contents/MacOS/ZCode Helper"
++    ),
++    cliEntry: join(installRoot, "Contents/Resources/glm/zcode.cjs"),
++    metadata: join(
++      installRoot,
++      "Contents/Resources/glm/.node-bundle-meta.json"
++    ),
++    appMetadata: join(installRoot, "Contents/Info.plist"),
++    appPackage: join(installRoot, "Contents/Resources/app.asar/package.json"),
++    hostArchive: join(installRoot, "Contents/Resources/app.asar"),
++  };
++}
++
++async function validatePaths(paths: RuntimePaths): Promise<void> {
++  try {
++    for (const candidate of [
++      paths.executable,
++      paths.cliEntry,
++      paths.metadata,
++      paths.appMetadata!,
++    ]) {
++      const resolved = await realpath(candidate);
++      ensureInside(paths.installRoot, resolved);
++      await access(resolved, constants.R_OK);
++    }
++    const hostArchive = await realpath(paths.hostArchive);
++    ensureInside(paths.installRoot, hostArchive);
++    const hostArchiveStat = await stat(hostArchive);
++    if (!hostArchiveStat.isFile() && !hostArchiveStat.isDirectory()) {
++      throw new Error("ZCode host archive has an unsupported file type");
++    }
++    await access(paths.executable, constants.X_OK);
++  } catch (error) {
++    if (error instanceof AdapterError) throw error;
++    throw new AdapterError(
++      "RUNTIME_DISCOVERY_FAILED",
++      "Required ZCode runtime files are unavailable",
++      {},
++      { cause: error }
++    );
++  }
++}
++
++function ensureInside(root: string, candidate: string): void {
++  const child = relative(root, candidate);
++  if (child.startsWith("..") || isAbsolute(child)) {
++    throw new AdapterError(
++      "RUNTIME_DISCOVERY_FAILED",
++      "Resolved runtime path is outside the install root"
++    );
++  }
++}
++
++async function sha256(file: string): Promise<string> {
++  return createHash("sha256")
++    .update(await readFile(file))
++    .digest("hex");
++}
++
++async function readPlist(
++  file: string,
++  key: string,
++  signal?: AbortSignal
++): Promise<string> {
++  const result = await run(
++    "/usr/libexec/PlistBuddy",
++    ["-c", `Print :${key}`, file],
++    {
++      cwd: dirname(file),
++      environment: process.env,
++      ...(signal === undefined ? {} : { signal }),
++    }
++  );
++  if (result.exitCode !== 0 || result.stdout.trim() === "") {
++    throw new AdapterError(
++      "RUNTIME_DISCOVERY_FAILED",
++      `ZCode Info.plist is missing ${key}`
++    );
++  }
++  return result.stdout.trim();
++}
++
++async function resolveHost(
++  paths: RuntimePaths,
++  artifact: HostArtifactDescriptor,
++  protocol: HostProtocolDescriptor,
++  environment: NodeJS.ProcessEnv,
++  signal?: AbortSignal
++): Promise<NonNullable<DiscoveredRuntime["resolvedHost"]>> {
++  const { hostIndex, hostRpcModule } = resolveHostContractPaths(
++    paths.installRoot,
++    paths.hostArchive,
++    artifact
++  );
++  const script = String.raw`
++const fs = require("node:fs");
++const crypto = require("node:crypto");
++const { pathToFileURL } = require("node:url");
++const hash = value => crypto.createHash("sha256").update(fs.readFileSync(value)).digest("hex");
++(async () => {
++  const rpc = await import(pathToFileURL(${JSON.stringify(
++    hostRpcModule
++  )}).href);
++  process.stdout.write(JSON.stringify({
++    hostIndexSha256: hash(${JSON.stringify(hostIndex)}),
++    hostRpcModuleSha256: hash(${JSON.stringify(hostRpcModule)}),
++    exports: Object.keys(rpc),
++  }));
++})().catch(() => process.exit(1));`;
++  const result = await run(paths.executable, ["-e", script], {
++    cwd: paths.installRoot,
++    environment,
++    ...(signal === undefined ? {} : { signal }),
++  });
++  if (result.exitCode !== 0) {
++    throw new AdapterError(
++      "RUNTIME_DISCOVERY_FAILED",
++      "Failed to inspect the manifest-selected ZCode host artifact"
++    );
++  }
++  const inspection = HostInspectionSchema.parse(JSON.parse(result.stdout));
++  return {
++    artifact,
++    protocol,
++    hostIndex,
++    hostRpcModule,
++    hostIndexSha256: inspection.hostIndexSha256,
++    hostRpcModuleSha256: inspection.hostRpcModuleSha256,
++    rpcExports: inspection.exports,
++  };
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/discovery/host-contract.ts b/packages/server/src/server/agent/providers/zcode/discovery/host-contract.ts
+new file mode 100644
+index 0000000..ff202cc
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/discovery/host-contract.ts
+@@ -0,0 +1,63 @@
++import { isAbsolute, join, relative } from "node:path";
++import { AdapterError } from "../errors.js";
++import type {
++  HostArtifactDescriptor,
++  HostProtocolDescriptor,
++} from "./types.js";
++
++export interface HostContractInspection {
++  readonly hostIndexSha256: string;
++  readonly hostRpcModuleSha256: string;
++  readonly exports: readonly string[];
++}
++
++export function resolveHostContractPaths(
++  installRoot: string,
++  hostArchive: string,
++  artifact: HostArtifactDescriptor
++): { hostIndex: string; hostRpcModule: string } {
++  const hostIndex = join(hostArchive, artifact.hostIndexRelativePath);
++  const hostRpcModule = join(hostArchive, artifact.hostRpcModuleRelativePath);
++  ensureInsideInstallRoot(installRoot, hostIndex);
++  ensureInsideInstallRoot(installRoot, hostRpcModule);
++  return { hostIndex, hostRpcModule };
++}
++
++export function resolvedHostMismatch(
++  artifact: HostArtifactDescriptor,
++  protocol: HostProtocolDescriptor,
++  inspection: HostContractInspection
++): string | undefined {
++  if (artifact.protocolId !== protocol.id) {
++    return "ZCode host artifact references an unavailable protocol";
++  }
++  for (const [operationName, operation] of Object.entries(
++    protocol.operations
++  )) {
++    if (protocol.serviceChannels[operation.service] === undefined) {
++      return `ZCode host protocol operation ${operationName} references an unavailable service: ${operation.service}`;
++    }
++  }
++  if (artifact.hostIndexSha256 !== inspection.hostIndexSha256) {
++    return "ZCode host index hash does not match the compatibility manifest";
++  }
++  if (artifact.hostRpcModuleSha256 !== inspection.hostRpcModuleSha256) {
++    return "ZCode host RPC module hash does not match the compatibility manifest";
++  }
++  for (const exportName of Object.values(artifact.rpcExports)) {
++    if (!inspection.exports.includes(exportName)) {
++      return `ZCode host RPC module is missing required export: ${exportName}`;
++    }
++  }
++  return undefined;
++}
++
++function ensureInsideInstallRoot(root: string, path: string): void {
++  const child = relative(root, path);
++  if (child.startsWith("..") || isAbsolute(child)) {
++    throw new AdapterError(
++      "RUNTIME_DISCOVERY_FAILED",
++      "Resolved runtime path is outside the install root"
++    );
++  }
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/discovery/manifest.ts b/packages/server/src/server/agent/providers/zcode/discovery/manifest.ts
+new file mode 100644
+index 0000000..224f2dc
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/discovery/manifest.ts
+@@ -0,0 +1,79 @@
++import type {
++  HostArtifactDescriptor,
++  HostProtocolDescriptor,
++  RuntimeIdentity,
++} from "./types.js";
++
++export const CURRENT_HOST_PROTOCOL: HostProtocolDescriptor = {
++  id: "zcode-task-v1",
++  serviceChannels: { agent: "zcode-agent", task: "zcode-task" },
++  operations: {
++    cancelGeneration: {
++      method: "stopGeneration",
++      service: "task",
++      sessionParameter: "taskId",
++    },
++    respondStructuredInput: {
++      method: "respondElicitation",
++      service: "task",
++      sessionParameter: "taskId",
++    },
++    respondPermission: {
++      method: "respondPermission",
++      service: "task",
++      sessionParameter: "taskId",
++    },
++  },
++};
++
++export const CURRENT_ZCODE_ARTIFACT: HostArtifactDescriptor = {
++  id: "zcode-host-3.11.2",
++  appVersion: "3.11.2",
++  cliVersion: "0.16.5",
++  cliSha256: "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8",
++  protocolId: "zcode-task-v1",
++  hostIndexRelativePath: "out/host/index.js",
++  hostRpcModuleRelativePath: "out/host/chunk-KGXW6KHC.js",
++  hostIndexSha256:
++    "30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215",
++  hostRpcModuleSha256:
++    "e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31",
++  rpcExports: { protocol: "g", client: "i", service: "j" },
++};
++
++export function assessCompatibility(identity: RuntimeIdentity): {
++  status: "supported" | "unsupported";
++  reason: string;
++  expectedCliSha256?: string;
++  cliIntegrity?: "verified" | "modified";
++  hostArtifact?: HostArtifactDescriptor;
++  hostProtocol?: HostProtocolDescriptor;
++} {
++  if (
++    identity.appVersion !== CURRENT_ZCODE_ARTIFACT.appVersion ||
++    identity.cliVersion !== CURRENT_ZCODE_ARTIFACT.cliVersion
++  ) {
++    return {
++      status: "unsupported",
++      reason:
++        "ZCode app or CLI version does not match the current compatibility manifest",
++    };
++  }
++
++  const cliIntegrity =
++    CURRENT_ZCODE_ARTIFACT.cliSha256 === identity.cliSha256
++      ? "verified"
++      : "modified";
++
++  return {
++    status: "supported",
++    reason:
++      cliIntegrity === "verified"
++        ? "ZCode app and CLI versions match the current compatibility manifest; the CLI artifact is verified"
++        : "ZCode app and CLI versions match; the CLI content differs from the verified artifact",
++    expectedCliSha256: CURRENT_ZCODE_ARTIFACT.cliSha256,
++    cliIntegrity,
++    hostArtifact: CURRENT_ZCODE_ARTIFACT,
++    hostProtocol: CURRENT_HOST_PROTOCOL,
++  };
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/discovery/types.ts b/packages/server/src/server/agent/providers/zcode/discovery/types.ts
+new file mode 100644
+index 0000000..28ea2c4
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/discovery/types.ts
+@@ -0,0 +1,97 @@
++export interface BundleMetadata {
++  readonly runtime: "electron-node";
++  readonly entry: "zcode.cjs";
++  readonly platform: string;
++  readonly source: "apps/zcode-cli/packages/cli/dist/zcode.cjs";
++}
++
++export interface RuntimePaths {
++  readonly installRoot: string;
++  readonly executable: string;
++  readonly cliEntry: string;
++  readonly metadata: string;
++  readonly appMetadata?: string;
++  readonly appPackage: string;
++  readonly hostArchive: string;
++}
++
++export type HostArtifactId = "zcode-host-3.11.2";
++
++export type HostProtocolId = "zcode-task-v1";
++
++export interface HostOperationDescriptor {
++  readonly method: string;
++  readonly service: "task";
++  readonly sessionParameter: "taskId";
++}
++
++export interface HostArtifactDescriptor {
++  readonly id: HostArtifactId;
++  readonly appVersion: string;
++  readonly cliVersion: string;
++  readonly cliSha256: string;
++  readonly protocolId: HostProtocolId;
++  readonly hostIndexRelativePath: string;
++  readonly hostRpcModuleRelativePath: string;
++  readonly hostIndexSha256: string;
++  readonly hostRpcModuleSha256: string;
++  readonly rpcExports: {
++    readonly protocol: string;
++    readonly client: string;
++    readonly service: string;
++  };
++}
++
++export interface HostProtocolDescriptor {
++  readonly id: HostProtocolId;
++  readonly serviceChannels: {
++    readonly agent: string;
++    readonly task: string;
++  };
++  readonly operations: {
++    readonly cancelGeneration: HostOperationDescriptor;
++    readonly respondStructuredInput: HostOperationDescriptor;
++    readonly respondPermission: HostOperationDescriptor;
++  };
++}
++
++export interface ResolvedHost {
++  readonly artifact: HostArtifactDescriptor;
++  readonly protocol: HostProtocolDescriptor;
++  readonly hostIndex: string;
++  readonly hostRpcModule: string;
++  readonly hostIndexSha256: string;
++  readonly hostRpcModuleSha256: string;
++  readonly rpcExports: readonly string[];
++}
++
++export type CompatibilityStatus = "supported" | "unsupported";
++
++export interface RuntimeIdentity {
++  readonly platform: string;
++  readonly appVersion?: string;
++  readonly appBuild?: string;
++  readonly cliVersion?: string;
++  readonly cliSha256: string;
++  readonly metadataSha256: string;
++  readonly bundle: BundleMetadata;
++}
++
++export interface DiscoveredRuntime {
++  readonly paths: RuntimePaths;
++  readonly identity: RuntimeIdentity;
++  readonly expectedCliSha256?: string;
++  readonly cliIntegrity?: "verified" | "modified";
++  readonly resolvedHost?: ResolvedHost;
++  readonly compatibility: CompatibilityStatus;
++  readonly compatibilityReason: string;
++  readonly writableInstallRoot: boolean;
++}
++
++export interface RuntimeSmokeResult {
++  readonly passed: boolean;
++  readonly cliVersion?: string;
++  readonly doctorPassed: boolean;
++  readonly authentication: "present" | "missing" | "unknown";
++  readonly error?: string;
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/errors.ts b/packages/server/src/server/agent/providers/zcode/errors.ts
+new file mode 100644
+index 0000000..6cdb183
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/errors.ts
+@@ -0,0 +1,28 @@
++export type ZCodeErrorCode =
++  | "INVALID_CONFIGURATION"
++  | "INVALID_WORKSPACE"
++  | "UNSUPPORTED_PLATFORM"
++  | "UNSUPPORTED_ZCODE"
++  | "RUNTIME_DISCOVERY_FAILED"
++  | "RUNTIME_SMOKE_FAILED"
++  | "NATIVE_PROTOCOL_ERROR"
++  | "NATIVE_TIMEOUT"
++  | "NATIVE_EXITED"
++  | "AUTH_REQUIRED"
++  | "UNSUPPORTED_CONTENT"
++  | "SESSION_NOT_FOUND"
++  | "SESSION_BUSY"
++  | "INTERACTION_UNSUPPORTED";
++
++export class AdapterError extends Error {
++  override readonly name = "ZCodeProviderError";
++
++  constructor(
++    readonly code: ZCodeErrorCode,
++    message: string,
++    readonly details: Record<string, unknown> = {},
++    options?: ErrorOptions
++  ) {
++    super(message, options);
++  }
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/host/bridge.ts b/packages/server/src/server/agent/providers/zcode/host/bridge.ts
+new file mode 100644
+index 0000000..7180eed
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/host/bridge.ts
+@@ -0,0 +1,280 @@
++import { randomUUID } from "node:crypto";
++import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
++import { Readable } from "node:stream";
++import { once } from "node:events";
++import { z } from "zod";
++
++import { assertRuntimeSupported } from "../discovery/discover.js";
++import type { DiscoveredRuntime } from "../discovery/types.js";
++import { AdapterError } from "../errors.js";
++import type { Logger } from "../logger.js";
++import {
++  ZCodeProtocolClient,
++  type NativeTransport,
++} from "../protocol/client.js";
++import type { NativeNotification } from "../protocol/v1/schemas.js";
++import {
++  DynamicEventSchema,
++  type DynamicEvent,
++} from "../protocol/v1/host-schemas.js";
++import { adaptHostRequest } from "./contract.js";
++import { ZCODE_HOST_BRIDGE_SOURCE } from "./runtime-source.js";
++
++const SubscriptionResponseSchema = z
++  .object({ subscribed: z.literal(true) })
++  .strict();
++const UnsubscriptionResponseSchema = z
++  .object({ unsubscribed: z.literal(true) })
++  .strict();
++const EventNotificationParamsSchema = z
++  .object({ subscriptionId: z.string().min(1), event: DynamicEventSchema })
++  .strict();
++
++export interface HostSubscription {
++  dispose(): Promise<void>;
++}
++
++export interface HostBridge {
++  request<Schema extends z.ZodType>(
++    method: string,
++    params: unknown,
++    resultSchema: Schema,
++    timeoutMs?: number,
++    diagnosticContext?: { readonly sessionId: string; readonly inputId: string }
++  ): Promise<z.output<Schema>>;
++  subscribe(
++    target: {
++      workspacePath: string;
++      sessionId: string;
++      deliveryKind: "desktop-continuous";
++      includeSnapshot: boolean;
++    },
++    handler: (event: DynamicEvent) => Promise<void> | void
++  ): Promise<HostSubscription>;
++  close(): Promise<void>;
++}
++
++export class ZCodeHostBridge implements HostBridge {
++  private readonly handlers = new Map<
++    string,
++    (event: DynamicEvent) => Promise<void> | void
++  >();
++  private readonly client: ZCodeProtocolClient;
++  private closePromise: Promise<void> | undefined;
++  private readonly exited: Promise<number>;
++
++  private constructor(
++    private readonly child: ChildProcessWithoutNullStreams,
++    transport: NodeBridgeTransport,
++    private readonly logger: Logger,
++    private readonly runtime: DiscoveredRuntime
++  ) {
++    this.client = new ZCodeProtocolClient(
++      transport,
++      logger,
++      undefined,
++      (notification) => this.handleNotification(notification)
++    );
++    this.client.start();
++    this.exited = new Promise((resolve, reject) => {
++      child.once("error", reject);
++      child.once("exit", (code, signal) => {
++        if (signal !== null) resolve(128);
++        else resolve(code ?? 1);
++      });
++    });
++    void drain(child.stderr).then((byteCount) => {
++      logger.log("debug", "zcode.host.stderr.closed", { byteCount });
++    });
++  }
++
++  static start(
++    runtime: DiscoveredRuntime,
++    logger: Logger,
++    environment: NodeJS.ProcessEnv = process.env
++  ): ZCodeHostBridge {
++    assertRuntimeSupported(runtime);
++    const host = runtime.resolvedHost;
++    if (host === undefined) {
++      throw new AdapterError(
++        "RUNTIME_DISCOVERY_FAILED",
++        "Supported ZCode artifact has no resolved host contract"
++      );
++    }
++    const child = spawn(
++      runtime.paths.executable,
++      ["-e", ZCODE_HOST_BRIDGE_SOURCE],
++      {
++        cwd: runtime.paths.installRoot,
++        env: {
++          ...environment,
++          ELECTRON_RUN_AS_NODE: "1",
++          PASEO_ZCODE_HOST_INDEX: host.hostIndex,
++          PASEO_ZCODE_HOST_RPC_MODULE: host.hostRpcModule,
++          PASEO_ZCODE_HOST_ARTIFACT: JSON.stringify(host.artifact),
++          PASEO_ZCODE_HOST_PROTOCOL: JSON.stringify(host.protocol),
++        },
++        stdio: ["pipe", "pipe", "pipe"],
++      }
++    );
++    const bridge = new ZCodeHostBridge(
++      child,
++      new NodeBridgeTransport(child),
++      logger,
++      runtime
++    );
++    logger.log("info", "zcode.host.started", { hostPid: child.pid });
++    void bridge.exited.then((exitCode) => {
++      logger.log(exitCode === 0 ? "info" : "error", "zcode.host.exited", {
++        hostPid: child.pid,
++        exitCode,
++      });
++    });
++    return bridge;
++  }
++
++  request<Schema extends z.ZodType>(
++    method: string,
++    params: unknown,
++    resultSchema: Schema,
++    timeoutMs = 30_000,
++    diagnosticContext?: { readonly sessionId: string; readonly inputId: string }
++  ): Promise<z.output<Schema>> {
++    const contract = this.runtime.resolvedHost;
++    if (contract === undefined) {
++      throw new AdapterError(
++        "RUNTIME_DISCOVERY_FAILED",
++        "ZCode host artifact is unavailable"
++      );
++    }
++    const adapted = adaptHostRequest(contract.protocol, method, params);
++    return this.client.request(
++      "__call",
++      {
++        service: adapted.service,
++        method: adapted.method,
++        params: adapted.params,
++      },
++      resultSchema,
++      timeoutMs,
++      diagnosticContext === undefined
++        ? undefined
++        : { operation: method, ...diagnosticContext }
++    );
++  }
++
++  async subscribe(
++    target: {
++      workspacePath: string;
++      sessionId: string;
++      deliveryKind: "desktop-continuous";
++      includeSnapshot: boolean;
++    },
++    handler: (event: DynamicEvent) => Promise<void> | void
++  ): Promise<HostSubscription> {
++    const subscriptionId = randomUUID();
++    this.handlers.set(subscriptionId, handler);
++    try {
++      await this.client.request(
++        "__subscribe",
++        { subscriptionId, target },
++        SubscriptionResponseSchema
++      );
++    } catch (error) {
++      this.handlers.delete(subscriptionId);
++      throw error;
++    }
++    let disposed = false;
++    return {
++      dispose: async () => {
++        if (disposed) return;
++        disposed = true;
++        this.handlers.delete(subscriptionId);
++        await this.client.request(
++          "__unsubscribe",
++          { subscriptionId },
++          UnsubscriptionResponseSchema
++        );
++      },
++    };
++  }
++
++  close(): Promise<void> {
++    this.closePromise ??= this.closeInternal();
++    return this.closePromise;
++  }
++
++  private async handleNotification(
++    notification: NativeNotification
++  ): Promise<void> {
++    if (notification.method !== "event") {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Unsupported host notification: ${notification.method}`
++      );
++    }
++    const parsed = EventNotificationParamsSchema.parse(notification.params);
++    const handler = this.handlers.get(parsed.subscriptionId);
++    if (handler === undefined) {
++      this.logger.log("debug", "zcode.host.event.after_unsubscribe", {
++        subscriptionId: parsed.subscriptionId,
++      });
++      return;
++    }
++    await handler(parsed.event);
++  }
++
++  private async closeInternal(): Promise<void> {
++    this.handlers.clear();
++    await this.client.close();
++    if (await waitForExit(this.exited, 4_000)) return;
++    this.child.kill("SIGTERM");
++    if (await waitForExit(this.exited, 2_000)) return;
++    this.child.kill("SIGKILL");
++    await this.exited;
++  }
++}
++
++class NodeBridgeTransport implements NativeTransport {
++  private closed = false;
++  readonly readable: ReadableStream<Uint8Array>;
++
++  constructor(private readonly child: ChildProcessWithoutNullStreams) {
++    this.readable = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
++  }
++
++  async write(frame: string): Promise<void> {
++    if (this.closed || !this.child.stdin.writable) {
++      throw new AdapterError("NATIVE_EXITED", "ZCode host stdin is closed");
++    }
++    if (!this.child.stdin.write(frame, "utf8")) {
++      await once(this.child.stdin, "drain");
++    }
++  }
++
++  async close(): Promise<void> {
++    if (this.closed) return;
++    this.closed = true;
++    this.child.stdin.end();
++  }
++}
++
++async function drain(stream: NodeJS.ReadableStream): Promise<number> {
++  let total = 0;
++  for await (const chunk of stream) {
++    total += Buffer.byteLength(chunk as Buffer);
++  }
++  return total;
++}
++
++function waitForExit(
++  exited: Promise<number>,
++  timeoutMs: number
++): Promise<boolean> {
++  return Promise.race([
++    exited.then(() => true),
++    new Promise<false>((resolve) =>
++      setTimeout(() => resolve(false), timeoutMs)
++    ),
++  ]);
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/host/contract.ts b/packages/server/src/server/agent/providers/zcode/host/contract.ts
+new file mode 100644
+index 0000000..6a24887
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/host/contract.ts
+@@ -0,0 +1,88 @@
++import { AdapterError } from "../errors.js";
++import type {
++  HostOperationDescriptor,
++  HostProtocolDescriptor,
++} from "../discovery/types.js";
++
++export interface AdaptedHostRequest {
++  readonly service: "agent" | "task";
++  readonly method: string;
++  readonly params: unknown;
++}
++
++export function adaptHostRequest(
++  protocol: HostProtocolDescriptor,
++  method: string,
++  params: unknown
++): AdaptedHostRequest {
++  if (method === "cancelGeneration") {
++    return {
++      service: protocol.operations.cancelGeneration.service,
++      method: protocol.operations.cancelGeneration.method,
++      params: remapSession(
++        requireRecord(params),
++        protocol.operations.cancelGeneration
++      ),
++    };
++  }
++
++  if (method === "respondStructuredInput") {
++    const input = requireRecord(params);
++    const response = requireRecord(input.response);
++    const { response: _response, ...base } = input;
++    const remapped = remapSession(
++      base,
++      protocol.operations.respondStructuredInput
++    );
++    return {
++      service: protocol.operations.respondStructuredInput.service,
++      method: protocol.operations.respondStructuredInput.method,
++      params: { ...remapped, ...response },
++    };
++  }
++
++  if (method === "respondPermission") {
++    const input = requireRecord(params);
++    const { optionId, response: _response, ...base } = input;
++    const remapped = remapSession(base, protocol.operations.respondPermission);
++    return {
++      service: protocol.operations.respondPermission.service,
++      method: protocol.operations.respondPermission.method,
++      params: {
++        ...remapped,
++        optionId: requireString(optionId, "permission optionId"),
++      },
++    };
++  }
++
++  return { service: "agent", method, params };
++}
++
++function remapSession(
++  params: Record<string, unknown>,
++  operation: HostOperationDescriptor
++): Record<string, unknown> {
++  const sessionId = requireString(params.sessionId, "sessionId");
++  const { sessionId: _sessionId, ...rest } = params;
++  return { ...rest, [operation.sessionParameter]: sessionId };
++}
++
++function requireRecord(value: unknown): Record<string, unknown> {
++  if (typeof value !== "object" || value === null || Array.isArray(value)) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      "Host bridge parameters must be an object"
++    );
++  }
++  return value as Record<string, unknown>;
++}
++
++function requireString(value: unknown, name: string): string {
++  if (typeof value !== "string" || value.length === 0) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      `Host bridge ${name} must be a string`
++    );
++  }
++  return value;
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/host/runtime-source.ts b/packages/server/src/server/agent/providers/zcode/host/runtime-source.ts
+new file mode 100644
+index 0000000..e98b323
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/host/runtime-source.ts
+@@ -0,0 +1,199 @@
++const ZCODE_HOST_WORKER_SOURCE = String.raw`
++import { parentPort, workerData } from "node:worker_threads";
++if (!parentPort) throw new Error("ZCode host worker requires a parent port");
++const outerListeners = new Map();
++function wrapPort(port) {
++  const listeners = new Map();
++  return {
++    on(event, listener) {
++      const wrapped = event === "message" ? data => listener({ data }) : (...args) => listener(...args);
++      listeners.set(listener, wrapped); port.on(event, wrapped); return this;
++    },
++    once(event, listener) {
++      const wrapped = event === "message" ? data => listener({ data }) : (...args) => listener(...args);
++      listeners.set(listener, wrapped); port.once(event, wrapped); return this;
++    },
++    off(event, listener) {
++      const wrapped = listeners.get(listener) || listener;
++      listeners.delete(listener); port.off(event, wrapped); return this;
++    },
++    postMessage(value, transferList) { port.postMessage(value, transferList); },
++    start() { port.start(); },
++    close() { port.close(); }
++  };
++}
++const electronParentPort = {
++  on(event, listener) {
++    const wrapped = value => listener({ ...value, ports: value?.ports?.map(wrapPort) || [] });
++    outerListeners.set(listener, wrapped); parentPort.on(event, wrapped); return this;
++  },
++  once(event, listener) {
++    const wrapped = value => listener({ ...value, ports: value?.ports?.map(wrapPort) || [] });
++    outerListeners.set(listener, wrapped); parentPort.once(event, wrapped); return this;
++  },
++  off(event, listener) {
++    const wrapped = outerListeners.get(listener) || listener;
++    outerListeners.delete(listener); parentPort.off(event, wrapped); return this;
++  },
++  postMessage(value, transferList) { parentPort.postMessage(value, transferList); }
++};
++Object.defineProperty(process, "parentPort", { value: electronParentPort, configurable: true });
++await import(workerData.hostIndexUrl);
++`;
++
++export const HEADLESS_BROWSER_MESSAGE_HANDLER_SOURCE = String.raw`
++worker.on("message", message => {
++  if (
++    message?.type !== "browser-execute-request" ||
++    typeof message.requestId !== "string" ||
++    message.requestId.length === 0
++  ) {
++    return;
++  }
++  worker.postMessage({
++    data: {
++      type: "browser-execute-result",
++      requestId: message.requestId,
++      result: {
++        ok: false,
++        error: {
++          code: "backend_unavailable",
++          message: "Browser control is unavailable in the Paseo ZCode provider",
++          sideEffect: "none"
++        },
++        elapsedMs: 0
++      }
++    },
++    ports: []
++  });
++});
++`;
++
++export const ZCODE_HOST_BRIDGE_SOURCE = String.raw`
++import { MessageChannel, Worker } from "node:worker_threads";
++import { pathToFileURL } from "node:url";
++import { createInterface } from "node:readline";
++
++const hostIndex = process.env.PASEO_ZCODE_HOST_INDEX;
++const hostRpcModule = process.env.PASEO_ZCODE_HOST_RPC_MODULE;
++const hostArtifactJson = process.env.PASEO_ZCODE_HOST_ARTIFACT;
++const hostProtocolJson = process.env.PASEO_ZCODE_HOST_PROTOCOL;
++if (!hostIndex || !hostRpcModule || !hostArtifactJson || !hostProtocolJson) {
++  throw new Error("Missing ZCode host artifact or protocol");
++}
++const hostArtifact = JSON.parse(hostArtifactJson);
++const hostProtocol = JSON.parse(hostProtocolJson);
++
++const workerSource = ${JSON.stringify(ZCODE_HOST_WORKER_SOURCE)};
++
++const worker = new Worker(new URL("data:text/javascript," + encodeURIComponent(workerSource)), {
++  workerData: { hostIndexUrl: pathToFileURL(hostIndex).href },
++  stdout: true,
++  stderr: true
++});
++worker.stdout.resume();
++worker.stderr.resume();
++${HEADLESS_BROWSER_MESSAGE_HANDLER_SOURCE}
++
++const rpc = await import(pathToFileURL(hostRpcModule).href);
++const ports = new MessageChannel();
++const protocol = new rpc[hostArtifact.rpcExports.protocol](ports.port1);
++const client = new rpc[hostArtifact.rpcExports.client](protocol);
++const serviceFactory = rpc[hostArtifact.rpcExports.service];
++const services = new Map(Object.entries(hostProtocol.serviceChannels).map(([name, channel]) => [
++  name,
++  serviceFactory.toService(client.getChannel(channel))
++]));
++const agentService = services.get("agent");
++if (!agentService) throw new Error("ZCode host protocol has no agent service");
++const subscriptions = new Map();
++const commonAgentMethods = new Set([
++  "initialize", "readWorkspaceState", "createSession", "resumeSession", "listSessions",
++  "readSession", "readSessionMessages", "readSessionEvents", "sendPrompt",
++  "closeSession", "setModel", "setThoughtLevel", "setMode", "getTaskTokenUsage",
++  "respondProviderRuntimeHeaders", "disposeWorkspace"
++]);
++const contractOperations = new Set(Object.values(hostProtocol.operations).map(operation =>
++  operation.service + ":" + operation.method
++));
++let shuttingDown = false;
++
++function write(value) {
++  process.stdout.write(JSON.stringify(value) + "\n");
++}
++
++async function dispatch(message) {
++  const id = message?.id;
++  if (!Number.isInteger(id) && typeof id !== "string") return;
++  try {
++    if (message.method === "__subscribe") {
++      const subscriptionId = message.params?.subscriptionId;
++      if (typeof subscriptionId !== "string" || !subscriptionId) throw new Error("Invalid subscription id");
++      if (subscriptions.has(subscriptionId)) throw new Error("Duplicate subscription id");
++      const disposable = agentService.onDynamicSessionEvent(message.params.target)(event => {
++        write({ method: "event", params: { subscriptionId, event } });
++      });
++      subscriptions.set(subscriptionId, disposable);
++      write({ id, result: { subscribed: true } });
++      return;
++    }
++    if (message.method === "__unsubscribe") {
++      const disposable = subscriptions.get(message.params?.subscriptionId);
++      disposable?.dispose();
++      subscriptions.delete(message.params?.subscriptionId);
++      write({ id, result: { unsubscribed: true } });
++      return;
++    }
++    if (message.method !== "__call") throw new Error("Unsupported bridge method: " + message.method);
++    const serviceName = message.params?.service;
++    const nativeMethod = message.params?.method;
++    const service = services.get(serviceName);
++    if (!service) throw new Error("Unsupported bridge service: " + serviceName);
++    const allowed = serviceName === "agent" && commonAgentMethods.has(nativeMethod) ||
++      contractOperations.has(serviceName + ":" + nativeMethod);
++    if (!allowed) throw new Error("Unsupported native bridge method: " + serviceName + ":" + nativeMethod);
++    const result = await service[nativeMethod](message.params?.params);
++    write({ id, result: result === undefined ? null : result });
++  } catch (error) {
++    write({ id, error: { code: -32000, message: error instanceof Error ? error.message : String(error) } });
++  }
++}
++
++function shutdown() {
++  if (shuttingDown) return;
++  shuttingDown = true;
++  for (const disposable of subscriptions.values()) disposable.dispose();
++  subscriptions.clear();
++  try { worker.postMessage({ data: { type: "dispose" }, ports: [] }); } catch {}
++  setTimeout(() => process.exit(0), 2000).unref();
++}
++
++worker.on("error", error => {
++  if (!shuttingDown) {
++    process.stderr.write("ZCode host worker failed: " + error.message + "\n");
++    process.exit(1);
++  }
++});
++worker.on("exit", code => {
++  if (!shuttingDown) process.exit(code === 0 ? 1 : code);
++});
++
++worker.postMessage({
++  data: {
++    type: "init-local",
++    deviceMid: "paseo-zcode-provider",
++    agentSpawnFallbackCwd: process.cwd()
++  },
++  ports: [ports.port2]
++}, [ports.port2]);
++
++const lines = createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
++lines.on("line", line => {
++  if (!line.trim()) return;
++  try { void dispatch(JSON.parse(line)); }
++  catch { write({ id: null, error: { code: -32700, message: "Invalid JSON" } }); }
++});
++lines.on("close", shutdown);
++process.once("SIGTERM", shutdown);
++process.once("SIGINT", shutdown);
++`;
+diff --git a/packages/server/src/server/agent/providers/zcode/host-contract.test.ts b/packages/server/src/server/agent/providers/zcode/host-contract.test.ts
+new file mode 100644
+index 0000000..03cf3c0
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/host-contract.test.ts
+@@ -0,0 +1,125 @@
++import { describe, expect, test } from "vitest";
++import { AdapterError } from "./errors.js";
++import {
++  resolvedHostMismatch,
++  resolveHostContractPaths,
++} from "./discovery/host-contract.js";
++import {
++  CURRENT_HOST_PROTOCOL,
++  CURRENT_ZCODE_ARTIFACT,
++} from "./discovery/manifest.js";
++import type { HostProtocolDescriptor } from "./discovery/types.js";
++import { adaptHostRequest } from "./host/contract.js";
++
++describe("ZCode host artifact and protocol", () => {
++  test("maps current task interactions to the native task protocol", () => {
++    expect(
++      adaptHostRequest(CURRENT_HOST_PROTOCOL, "cancelGeneration", {
++        sessionId: "s",
++        workspacePath: "/w",
++      })
++    ).toEqual({
++      service: "task",
++      method: "stopGeneration",
++      params: { taskId: "s", workspacePath: "/w" },
++    });
++    expect(
++      adaptHostRequest(CURRENT_HOST_PROTOCOL, "respondStructuredInput", {
++        sessionId: "s",
++        requestId: "r",
++        response: { action: "accept", content: { answer: "yes" } },
++      })
++    ).toEqual({
++      service: "task",
++      method: "respondElicitation",
++      params: {
++        taskId: "s",
++        requestId: "r",
++        action: "accept",
++        content: { answer: "yes" },
++      },
++    });
++    expect(
++      adaptHostRequest(CURRENT_HOST_PROTOCOL, "respondPermission", {
++        sessionId: "s",
++        requestId: "r",
++        optionId: "allow-once",
++        response: { decision: "allow" },
++      })
++    ).toEqual({
++      service: "task",
++      method: "respondPermission",
++      params: { taskId: "s", requestId: "r", optionId: "allow-once" },
++    });
++  });
++
++  test("rejects a missing permission option ID", () => {
++    expect(() =>
++      adaptHostRequest(CURRENT_HOST_PROTOCOL, "respondPermission", {
++        sessionId: "s",
++        requestId: "r",
++        response: { decision: "deny" },
++      })
++    ).toThrow(AdapterError);
++  });
++
++  test("rejects host paths that escape the install root", () => {
++    expect(() =>
++      resolveHostContractPaths(
++        "/Applications/ZCode.app",
++        "/Applications/ZCode.app/app.asar",
++        {
++          ...CURRENT_ZCODE_ARTIFACT,
++          hostRpcModuleRelativePath: "../../../outside.js",
++        }
++      )
++    ).toThrow("outside the install root");
++  });
++
++  test("rejects host hashes and required RPC exports independently", () => {
++    const valid = {
++      hostIndexSha256: CURRENT_ZCODE_ARTIFACT.hostIndexSha256,
++      hostRpcModuleSha256: CURRENT_ZCODE_ARTIFACT.hostRpcModuleSha256,
++      exports: ["g", "i", "j"],
++    };
++    expect(
++      resolvedHostMismatch(CURRENT_ZCODE_ARTIFACT, CURRENT_HOST_PROTOCOL, valid)
++    ).toBeUndefined();
++    expect(
++      resolvedHostMismatch(CURRENT_ZCODE_ARTIFACT, CURRENT_HOST_PROTOCOL, {
++        ...valid,
++        hostIndexSha256: "c".repeat(64),
++      })
++    ).toBe("ZCode host index hash does not match the compatibility manifest");
++    expect(
++      resolvedHostMismatch(CURRENT_ZCODE_ARTIFACT, CURRENT_HOST_PROTOCOL, {
++        ...valid,
++        hostRpcModuleSha256: "c".repeat(64),
++      })
++    ).toBe(
++      "ZCode host RPC module hash does not match the compatibility manifest"
++    );
++    expect(
++      resolvedHostMismatch(CURRENT_ZCODE_ARTIFACT, CURRENT_HOST_PROTOCOL, {
++        ...valid,
++        exports: ["g", "i"],
++      })
++    ).toBe("ZCode host RPC module is missing required export: j");
++  });
++
++  test("rejects an operation whose service channel is unavailable", () => {
++    const protocol = structuredClone(
++      CURRENT_HOST_PROTOCOL
++    ) as HostProtocolDescriptor;
++    delete (protocol.serviceChannels as { task?: string }).task;
++    expect(
++      resolvedHostMismatch(CURRENT_ZCODE_ARTIFACT, protocol, {
++        hostIndexSha256: CURRENT_ZCODE_ARTIFACT.hostIndexSha256,
++        hostRpcModuleSha256: CURRENT_ZCODE_ARTIFACT.hostRpcModuleSha256,
++        exports: ["g", "i", "j"],
++      })
++    ).toBe(
++      "ZCode host protocol operation cancelGeneration references an unavailable service: task"
++    );
++  });
++});
+diff --git a/packages/server/src/server/agent/providers/zcode/host-runtime-source.test.ts b/packages/server/src/server/agent/providers/zcode/host-runtime-source.test.ts
+new file mode 100644
+index 0000000..3d2867d
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/host-runtime-source.test.ts
+@@ -0,0 +1,66 @@
++import { describe, expect, test } from "vitest";
++import { HEADLESS_BROWSER_MESSAGE_HANDLER_SOURCE } from "./host/runtime-source.js";
++
++type WorkerMessageHandler = (message: unknown) => void;
++
++function createHarness() {
++  let messageHandler: WorkerMessageHandler | undefined;
++  const posted: unknown[] = [];
++  const worker = {
++    on(event: string, handler: WorkerMessageHandler) {
++      if (event === "message") messageHandler = handler;
++    },
++    postMessage(message: unknown) {
++      posted.push(message);
++    },
++  };
++
++  Function("worker", HEADLESS_BROWSER_MESSAGE_HANDLER_SOURCE)(worker);
++  if (messageHandler === undefined)
++    throw new Error("message handler was not registered");
++  return { handle: messageHandler, posted };
++}
++
++describe("headless ZCode host worker messages", () => {
++  test("rejects browser execution immediately without copying the request payload", () => {
++    const harness = createHarness();
++
++    harness.handle({
++      type: "browser-execute-request",
++      requestId: "browser-request-1",
++      command: { method: "navigate", url: "https://secret.example" },
++    });
++
++    expect(harness.posted).toEqual([
++      {
++        data: {
++          type: "browser-execute-result",
++          requestId: "browser-request-1",
++          result: {
++            ok: false,
++            error: {
++              code: "backend_unavailable",
++              message:
++                "Browser control is unavailable in the Paseo ZCode provider",
++              sideEffect: "none",
++            },
++            elapsedMs: 0,
++          },
++        },
++        ports: [],
++      },
++    ]);
++    expect(JSON.stringify(harness.posted)).not.toContain("secret.example");
++  });
++
++  test("ignores unknown messages and invalid request IDs", () => {
++    const harness = createHarness();
++
++    harness.handle({ type: "log", requestId: "log-1" });
++    harness.handle({ type: "browser-execute-request" });
++    harness.handle({ type: "browser-execute-request", requestId: "" });
++    harness.handle({ type: "browser-execute-request", requestId: 1 });
++
++    expect(harness.posted).toEqual([]);
++  });
++});
+diff --git a/packages/server/src/server/agent/providers/zcode/host-schemas.test.ts b/packages/server/src/server/agent/providers/zcode/host-schemas.test.ts
+new file mode 100644
+index 0000000..afee22e
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/host-schemas.test.ts
+@@ -0,0 +1,104 @@
++import { describe, expect, test } from "vitest";
++import {
++  DynamicEventSchema,
++  PermissionRequestSchema,
++} from "./protocol/v1/host-schemas.js";
++
++describe("ZCode host schemas", () => {
++  test("accepts the observed permission shape without widening it", () => {
++    const request = {
++      requestId: "permission-1",
++      sessionId: "session-1",
++      toolCallId: "tool-1",
++      toolName: "Write",
++      reason: "Write a file",
++      riskLevel: "medium" as const,
++      input: { path: "/tmp/example" },
++      options: [
++        {
++          optionId: "allow-once",
++          kind: "allow_once",
++          name: "Allow once",
++          response: { decision: "allow" as const },
++        },
++        {
++          optionId: "deny-once",
++          kind: "deny_once",
++          name: "Deny",
++          response: { decision: "deny" as const, reason: "Denied" },
++        },
++      ],
++    };
++    expect(PermissionRequestSchema.parse(request)).toEqual(request);
++    expect(() =>
++      PermissionRequestSchema.parse({ ...request, unexpected: true })
++    ).toThrow();
++  });
++
++  test("accepts observed model and tool events and rejects malformed sequence", () => {
++    const base = {
++      eventId: "event-1",
++      sessionId: "session-1",
++      turnId: "turn-1",
++      seq: 1,
++      timestamp: 1,
++      deliveryKind: "desktop-continuous",
++    };
++    expect(
++      DynamicEventSchema.parse({
++        type: "session.event",
++        event: {
++          ...base,
++          type: "model.streaming",
++          payload: { kind: "text_delta", delta: "hi" },
++        },
++      })
++    ).toBeTruthy();
++    expect(
++      DynamicEventSchema.parse({
++        type: "session.event",
++        event: {
++          ...base,
++          eventId: "event-2",
++          seq: 2,
++          type: "tool.updated",
++          payload: { kind: "result", toolCallId: "tool-1" },
++        },
++      })
++    ).toBeTruthy();
++    expect(
++      DynamicEventSchema.parse({
++        type: "session.event",
++        event: {
++          ...base,
++          eventId: "event-3",
++          seq: 3,
++          type: "tool.updated",
++          payload: {
++            kind: "progress",
++            toolCallId: "tool-1",
++            toolName: "Bash",
++            elapsedMs: 1_500,
++            pid: 42,
++            stdoutBytes: 120,
++            stderrBytes: 5,
++            outputBytes: 125,
++            stdoutTail: "partial output",
++            stderrTail: "warning",
++          },
++        },
++      })
++    ).toBeTruthy();
++    expect(() =>
++      DynamicEventSchema.parse({
++        type: "session.event",
++        event: {
++          ...base,
++          seq: -1,
++          type: "turn.completed",
++          payload: { resultType: "success" },
++        },
++      })
++    ).toThrow();
++  });
++});
+diff --git a/packages/server/src/server/agent/providers/zcode/logger.ts b/packages/server/src/server/agent/providers/zcode/logger.ts
+new file mode 100644
+index 0000000..ddc1aa8
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/logger.ts
+@@ -0,0 +1,21 @@
++import type { Logger as PaseoLogger } from "pino";
++
++export interface Logger {
++  log(
++    level: "debug" | "info" | "warn" | "error",
++    event: string,
++    data?: Record<string, unknown>
++  ): void;
++  error(event: string, error: unknown, data?: Record<string, unknown>): void;
++}
++
++export function adaptLogger(logger: PaseoLogger): Logger {
++  return {
++    log(level, event, data = {}) {
++      logger[level]({ ...data, component: "zcode" }, event);
++    },
++    error(event, error, data = {}) {
++      logger.error({ ...data, err: error, component: "zcode" }, event);
++    },
++  };
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/manifest.test.ts b/packages/server/src/server/agent/providers/zcode/manifest.test.ts
+new file mode 100644
+index 0000000..f051dd4
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/manifest.test.ts
+@@ -0,0 +1,86 @@
++import { describe, expect, test } from "vitest";
++import {
++  assessCompatibility,
++  CURRENT_HOST_PROTOCOL,
++  CURRENT_ZCODE_ARTIFACT,
++} from "./discovery/manifest.js";
++import type { RuntimeIdentity } from "./discovery/types.js";
++
++const OFFICIAL_CLI_SHA256 =
++  "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8";
++
++function identity(
++  platform: string,
++  overrides: Partial<RuntimeIdentity> = {}
++): RuntimeIdentity {
++  return {
++    platform,
++    appVersion: "3.11.2",
++    appBuild: "3.11.2.6792",
++    cliVersion: "0.16.5",
++    cliSha256: OFFICIAL_CLI_SHA256,
++    metadataSha256: `metadata-${platform}`,
++    bundle: {
++      runtime: "electron-node",
++      entry: "zcode.cjs",
++      platform,
++      source: "apps/zcode-cli/packages/cli/dist/zcode.cjs",
++    },
++    ...overrides,
++  };
++}
++
++describe("ZCode compatibility manifest", () => {
++  test("maps macOS, Linux, and Windows to the same artifact and protocol", () => {
++    for (const platform of ["darwin-arm64", "linux-x64", "win32-x64"]) {
++      expect(assessCompatibility(identity(platform))).toMatchObject({
++        status: "supported",
++        cliIntegrity: "verified",
++        expectedCliSha256: OFFICIAL_CLI_SHA256,
++        hostArtifact: { id: "zcode-host-3.11.2" },
++        hostProtocol: { id: "zcode-task-v1" },
++      });
++    }
++  });
++
++  test("treats app build and raw metadata hashes as diagnostics", () => {
++    expect(
++      assessCompatibility(
++        identity("darwin-arm64", {
++          appBuild: "different-build",
++          metadataSha256: "different-metadata-hash",
++        })
++      )
++    ).toMatchObject({
++      status: "supported",
++      hostArtifact: { id: CURRENT_ZCODE_ARTIFACT.id },
++      hostProtocol: { id: CURRENT_HOST_PROTOCOL.id },
++    });
++  });
++
++  test("reports a modified CLI without rejecting a matching host candidate", () => {
++    expect(
++      assessCompatibility(identity("linux-arm64", { cliSha256: "modified" }))
++    ).toMatchObject({
++      status: "supported",
++      cliIntegrity: "modified",
++      expectedCliSha256: OFFICIAL_CLI_SHA256,
++      hostArtifact: { id: "zcode-host-3.11.2" },
++    });
++  });
++
++  test("rejects old, future, or unknown CLI versions", () => {
++    expect(
++      assessCompatibility(identity("darwin-arm64", { appVersion: "3.10.2" }))
++        .status
++    ).toBe("unsupported");
++    expect(
++      assessCompatibility(identity("darwin-arm64", { appVersion: "3.11.3" }))
++        .status
++    ).toBe("unsupported");
++    expect(
++      assessCompatibility(identity("darwin-arm64", { cliVersion: "0.16.6" }))
++        .status
++    ).toBe("unsupported");
++  });
++});
+diff --git a/packages/server/src/server/agent/providers/zcode/mapping.test.ts b/packages/server/src/server/agent/providers/zcode/mapping.test.ts
+new file mode 100644
+index 0000000..31407ce
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/mapping.test.ts
+@@ -0,0 +1,327 @@
++import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { afterEach, describe, expect, it } from "vitest";
++
++import {
++  catalogModels,
++  decodeModel,
++  encodeModel,
++  historyTimeline,
++  mapMcpServers,
++  mapPrompt,
++  mapQuestionRequest,
++  permissionActions,
++  planMarkdown,
++  questionContent,
++} from "./mapping.js";
++import type {
++  PermissionRequest,
++  SessionSettings,
++  UserInputRequest,
++} from "./protocol/v1/host-schemas.js";
++
++const temporaryDirectories: string[] = [];
++
++function settings(): SessionSettings {
++  return {
++    model: {
++      current: { providerId: "anthropic", modelId: "claude", variant: "fast" },
++      available: [
++        {
++          ref: { providerId: "anthropic", modelId: "claude", variant: "fast" },
++          label: "ignored host label",
++          providerLabel: "Anthropic",
++        },
++      ],
++    },
++    thoughtLevel: {
++      enabled: true,
++      current: "high",
++      available: [
++        { value: "low", label: "Low" },
++        { value: "high", label: "High" },
++      ],
++    },
++    mode: { current: "plan" },
++  };
++}
++
++afterEach(async () => {
++  await Promise.all(
++    temporaryDirectories
++      .splice(0)
++      .map((directory) => rm(directory, { recursive: true, force: true }))
++  );
++});
++
++describe("ZCode catalog mapping", () => {
++  it("uses a reversible model tuple and the native thought-level catalog", () => {
++    const ref = { providerId: "anthropic", modelId: "claude", variant: "fast" };
++    expect(decodeModel(encodeModel(ref))).toEqual(ref);
++    expect(catalogModels(settings())).toEqual([
++      expect.objectContaining({
++        provider: "zcode",
++        id: '["anthropic","claude","fast"]',
++        label: "claude",
++        description: "Anthropic",
++        isDefault: true,
++        defaultThinkingOptionId: "high",
++        thinkingOptions: [
++          { id: "low", label: "Low", isDefault: false },
++          { id: "high", label: "High", isDefault: true },
++        ],
++      }),
++    ]);
++  });
++
++  it("rejects duplicate models and unknown modes", () => {
++    const value = settings();
++    value.model.available.push({ ...value.model.available[0]! });
++    expect(() => catalogModels(value)).toThrow(/Duplicate ZCode model/u);
++    value.model.available.pop();
++    value.mode.current = "future";
++    expect(() => catalogModels(value)).toThrow(/unknown mode/u);
++  });
++});
++
++describe("ZCode persisted history", () => {
++  it("maps content in order and ignores only known host bookkeeping parts", () => {
++    const timeline = historyTimeline({
++      session: {
++        sessionId: "session-1",
++        status: "idle",
++        workspace: { workspacePath: "/workspace" },
++      },
++      settings: settings(),
++      messages: [
++        {
++          info: { messageId: "assistant-meta", role: "assistant" },
++          parts: [{ type: "timeline", timelineType: "session_started" }],
++        },
++        {
++          info: { messageId: "user-1", role: "user" },
++          parts: [{ type: "text", text: "question" }],
++        },
++        {
++          info: { messageId: "assistant-1", role: "assistant" },
++          parts: [
++            { type: "step-start" },
++            { type: "reasoning", text: "thinking" },
++            { type: "text", text: "answer" },
++            { type: "step-finish", reason: "stop" },
++          ],
++        },
++      ],
++      runtime: {},
++      todos: [],
++      slashCommands: [],
++    });
++    expect(timeline).toEqual([
++      { type: "user_message", text: "question", messageId: "user-1" },
++      { type: "reasoning", text: "thinking" },
++      { type: "assistant_message", text: "answer", messageId: "assistant-1" },
++      { type: "todo", items: [] },
++    ]);
++  });
++
++  it("still fails closed for unknown persisted content", () => {
++    const value = {
++      session: {
++        sessionId: "session-1",
++        status: "idle",
++        workspace: { workspacePath: "/workspace" },
++      },
++      settings: settings(),
++      messages: [
++        {
++          info: { messageId: "assistant-1", role: "assistant" as const },
++          parts: [{ type: "future-part" }],
++        },
++      ],
++      runtime: {},
++      slashCommands: [],
++    };
++    expect(() => historyTimeline(value)).toThrow(
++      /Unsupported persisted message part/u
++    );
++  });
++});
++
++describe("ZCode prompt and MCP mapping", () => {
++  it("maps files only after canonical workspace containment checks", async () => {
++    const workspace = await mkdtemp(join(tmpdir(), "zcode-workspace-"));
++    temporaryDirectories.push(workspace);
++    const nested = join(workspace, "files");
++    await mkdir(nested);
++    const file = join(nested, "sample.wav");
++    await writeFile(file, "audio");
++
++    await expect(
++      mapPrompt(
++        [
++          { type: "text", text: "inspect" },
++          {
++            type: "uploaded_file",
++            id: "1",
++            fileName: "sample.wav",
++            mimeType: "audio/wav",
++            size: 5,
++            path: file,
++          },
++        ],
++        workspace
++      )
++    ).resolves.toEqual({
++      content: "inspect",
++      attachments: [
++        {
++          kind: "audio",
++          filename: "sample.wav",
++          mimeType: "audio/wav",
++          localPath: await realpath(file),
++          sizeBytes: 5,
++        },
++      ],
++    });
++    await expect(
++      mapPrompt(
++        [
++          {
++            type: "uploaded_file",
++            id: "2",
++            fileName: "outside",
++            mimeType: "text/plain",
++            size: 1,
++            path: "/etc/hosts",
++          },
++        ],
++        workspace
++      )
++    ).rejects.toThrow(/inside the workspace/u);
++  });
++
++  it("losslessly maps supported MCP transports and rejects unsupported fields", () => {
++    expect(
++      mapMcpServers({
++        local: {
++          type: "stdio",
++          command: "/usr/bin/env",
++          args: ["node"],
++          env: { A: "B" },
++        },
++        remote: {
++          type: "http",
++          url: "https://example.test/mcp",
++          headers: { Authorization: "placeholder" },
++        },
++      })
++    ).toEqual([
++      {
++        name: "local",
++        command: "/usr/bin/env",
++        args: ["node"],
++        env: [{ name: "A", value: "B" }],
++      },
++      {
++        type: "http",
++        name: "remote",
++        url: "https://example.test/mcp",
++        headers: [{ name: "Authorization", value: "placeholder" }],
++      },
++    ]);
++    expect(() =>
++      mapMcpServers({
++        unsupported: {
++          type: "stdio",
++          command: "/bin/echo",
++          alwaysLoad: true,
++        },
++      })
++    ).toThrow(/alwaysLoad/u);
++  });
++});
++
++describe("ZCode interactions", () => {
++  it("round-trips displayed question labels to native values", () => {
++    const request = {
++      requestId: "q1",
++      sessionId: "s1",
++      prompt: "Choose",
++      questions: [
++        {
++          question: "Which mode?",
++          header: "Mode",
++          options: [
++            { value: "fast", label: "Fast" },
++            { value: "safe", label: "Safe" },
++          ],
++        },
++        {
++          question: "Features?",
++          header: "Features",
++          multiSelect: true,
++          options: [
++            { value: "tools", label: "Tools" },
++            { value: "todos", label: "Todos" },
++          ],
++        },
++      ],
++    } satisfies UserInputRequest;
++    const mapped = mapQuestionRequest(request, "question:q1");
++    expect(mapped.request.kind).toBe("question");
++    expect(
++      questionContent(mapped.fields, {
++        Mode: "Fast",
++        Features: "Tools, Todos",
++      })
++    ).toEqual({
++      answer_0: "fast",
++      answer_1: ["tools", "todos"],
++      answer: "fast",
++      answers: {
++        "Which mode?": ["fast"],
++        "Features?": ["tools", "todos"],
++      },
++    });
++    expect(() => questionContent(mapped.fields, { Mode: "Unknown" })).toThrow(
++      /unknown option/u
++    );
++  });
++
++  it("keeps native permission option IDs and requires plan allow and deny", () => {
++    const request = {
++      requestId: "p1",
++      sessionId: "s1",
++      toolCallId: "t1",
++      toolName: "ExitPlanMode",
++      reason: "Review",
++      riskLevel: "low",
++      input: { plan: "# Plan" },
++      options: [
++        {
++          optionId: "approve-native",
++          kind: "allow_once",
++          name: "Approve",
++          response: { decision: "allow" },
++        },
++        {
++          optionId: "dismiss-native",
++          kind: "deny_once",
++          name: "Dismiss",
++          response: { decision: "deny" },
++        },
++      ],
++    } satisfies PermissionRequest;
++    expect(permissionActions(request, true).map((action) => action.id)).toEqual(
++      ["approve-native", "dismiss-native"]
++    );
++    expect(planMarkdown(request.input)).toBe("# Plan");
++    expect(() =>
++      permissionActions(
++        { ...request, options: request.options.slice(0, 1) },
++        true
++      )
++    ).toThrow(/allow and deny/u);
++  });
++});
+diff --git a/packages/server/src/server/agent/providers/zcode/mapping.ts b/packages/server/src/server/agent/providers/zcode/mapping.ts
+new file mode 100644
+index 0000000..180edf5
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/mapping.ts
+@@ -0,0 +1,579 @@
++import { realpath, stat } from "node:fs/promises";
++import { basename, isAbsolute, relative } from "node:path";
++
++import type {
++  AgentMode,
++  AgentModelDefinition,
++  AgentPermissionAction,
++  AgentPermissionRequest,
++  AgentPromptInput,
++  AgentSelectOption,
++  AgentTimelineItem,
++  McpServerConfig,
++  ToolCallDetail,
++} from "../../agent-sdk-types.js";
++import { AdapterError } from "./errors.js";
++import type {
++  PermissionRequest,
++  SessionSettings,
++  SessionSnapshot,
++  UserInputRequest,
++} from "./protocol/v1/host-schemas.js";
++
++export const ZCODE_PROVIDER_ID = "zcode";
++export const ZCODE_MODES: AgentMode[] = [
++  {
++    id: "build",
++    label: "Ask Before Changes",
++    description: "Ask before changing files or running tools",
++  },
++  {
++    id: "edit",
++    label: "Edit Automatically",
++    description: "Edit files automatically while keeping other approvals",
++  },
++  {
++    id: "plan",
++    label: "Plan Mode",
++    description: "Inspect the workspace and present a plan before editing",
++  },
++  {
++    id: "yolo",
++    label: "Full Access",
++    description: "Run tools without approval",
++  },
++];
++
++export function requireMode(mode: string): string {
++  if (!ZCODE_MODES.some((candidate) => candidate.id === mode)) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      `ZCode returned an unknown mode: ${mode}`
++    );
++  }
++  return mode;
++}
++
++interface ModelRef {
++  providerId: string;
++  modelId: string;
++  variant?: string | null;
++}
++
++export function encodeModel(model: ModelRef): string {
++  return JSON.stringify([
++    model.providerId,
++    model.modelId,
++    model.variant ?? null,
++  ]);
++}
++
++export function decodeModel(value: string): ModelRef {
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(value);
++  } catch {
++    throw new AdapterError("INVALID_CONFIGURATION", "Invalid ZCode model ID");
++  }
++  if (
++    !Array.isArray(parsed) ||
++    parsed.length !== 3 ||
++    typeof parsed[0] !== "string" ||
++    parsed[0].length === 0 ||
++    typeof parsed[1] !== "string" ||
++    parsed[1].length === 0 ||
++    (parsed[2] !== null && typeof parsed[2] !== "string")
++  ) {
++    throw new AdapterError("INVALID_CONFIGURATION", "Invalid ZCode model ID");
++  }
++  return {
++    providerId: parsed[0],
++    modelId: parsed[1],
++    ...(parsed[2] === null ? {} : { variant: parsed[2] }),
++  };
++}
++
++export function catalogModels(
++  settings: SessionSettings
++): AgentModelDefinition[] {
++  const ids = new Set<string>();
++  const current = encodeModel(settings.model.current);
++  const thinking: AgentSelectOption[] =
++    settings.thoughtLevel.enabled &&
++    settings.thoughtLevel.current !== undefined &&
++    settings.thoughtLevel.available.length > 0
++      ? settings.thoughtLevel.available.map((option) => ({
++          id: option.value,
++          label: option.label,
++          isDefault: option.value === settings.thoughtLevel.current,
++        }))
++      : [];
++  const models = settings.model.available.map((model) => {
++    const id = encodeModel(model.ref);
++    if (ids.has(id)) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Duplicate ZCode model ID: ${id}`
++      );
++    }
++    ids.add(id);
++    return {
++      provider: ZCODE_PROVIDER_ID,
++      id,
++      label: model.ref.modelId,
++      ...(model.providerLabel === undefined
++        ? {}
++        : { description: model.providerLabel }),
++      isDefault: id === current,
++      ...(thinking.length === 0
++        ? {}
++        : {
++            thinkingOptions: thinking,
++            defaultThinkingOptionId: settings.thoughtLevel.current,
++          }),
++    };
++  });
++  if (!ids.has(current)) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      "The current ZCode model is absent from the available model list"
++    );
++  }
++  requireMode(settings.mode.current);
++  return models;
++}
++
++export function mapMcpServers(
++  servers: Record<string, McpServerConfig> | undefined
++): Array<Record<string, unknown>> {
++  return Object.entries(servers ?? {}).map(([name, server]) => {
++    if (name.trim() === "") {
++      throw new AdapterError(
++        "INVALID_CONFIGURATION",
++        "MCP server name must not be empty"
++      );
++    }
++    if (server.alwaysLoad !== undefined) {
++      throw new AdapterError(
++        "INVALID_CONFIGURATION",
++        `MCP server '${name}' uses unsupported alwaysLoad`
++      );
++    }
++    if (server.type === "stdio") {
++      if (!isAbsolute(server.command)) {
++        throw new AdapterError(
++          "INVALID_CONFIGURATION",
++          `MCP server '${name}' command must be absolute`
++        );
++      }
++      return {
++        name,
++        command: server.command,
++        args: server.args ?? [],
++        env: Object.entries(server.env ?? {}).map(([key, value]) => ({
++          name: key,
++          value,
++        })),
++      };
++    }
++    const headers = Object.entries(server.headers ?? {}).map(
++      ([key, value]) => ({
++        name: key,
++        value,
++      })
++    );
++    if (server.type === "http" || server.type === "sse") {
++      return { type: server.type, name, url: server.url, headers };
++    }
++    const unreachable: never = server;
++    throw new AdapterError(
++      "INVALID_CONFIGURATION",
++      `Unsupported MCP server: ${String(unreachable)}`
++    );
++  });
++}
++
++export interface NativePrompt {
++  content: string;
++  attachments: Array<{
++    kind: "image" | "audio" | "file";
++    filename: string;
++    mimeType: string;
++    dataBase64?: string;
++    localPath?: string;
++    sizeBytes?: number;
++  }>;
++}
++
++export async function mapPrompt(
++  prompt: AgentPromptInput,
++  workspace: string
++): Promise<NativePrompt> {
++  if (typeof prompt === "string") return { content: prompt, attachments: [] };
++  const canonicalWorkspace = await realpath(workspace);
++  const content: string[] = [];
++  const attachments: NativePrompt["attachments"] = [];
++  for (const block of prompt) {
++    if (block.type === "text") {
++      content.push(block.text);
++      continue;
++    }
++    if (block.type === "image") {
++      attachments.push({
++        kind: "image",
++        filename: `image.${
++          block.mimeType.split("/")[1]?.split("+")[0] ?? "bin"
++        }`,
++        mimeType: block.mimeType,
++        dataBase64: block.data,
++        sizeBytes: Buffer.from(block.data, "base64").byteLength,
++      });
++      continue;
++    }
++    if (block.type === "uploaded_file") {
++      if (!isAbsolute(block.path)) {
++        throw new AdapterError(
++          "UNSUPPORTED_CONTENT",
++          "Attachment path must be absolute"
++        );
++      }
++      const resolved = await realpath(block.path);
++      const child = relative(canonicalWorkspace, resolved);
++      if (child.startsWith("..") || isAbsolute(child)) {
++        throw new AdapterError(
++          "UNSUPPORTED_CONTENT",
++          "Attachment path must remain inside the workspace"
++        );
++      }
++      const info = await stat(resolved);
++      if (!info.isFile()) {
++        throw new AdapterError(
++          "UNSUPPORTED_CONTENT",
++          "Attachment must be a regular file"
++        );
++      }
++      attachments.push({
++        kind: block.mimeType.startsWith("image/")
++          ? "image"
++          : block.mimeType.startsWith("audio/")
++          ? "audio"
++          : "file",
++        filename: block.fileName || basename(resolved),
++        mimeType: block.mimeType,
++        localPath: resolved,
++        sizeBytes: info.size,
++      });
++      continue;
++    }
++    throw new AdapterError(
++      "UNSUPPORTED_CONTENT",
++      `Unsupported Paseo attachment type: ${block.type}`
++    );
++  }
++  return { content: content.join("\n\n"), attachments };
++}
++
++export function historyTimeline(
++  snapshot: SessionSnapshot
++): AgentTimelineItem[] {
++  const result: AgentTimelineItem[] = [];
++  for (const message of snapshot.messages) {
++    for (const part of message.parts) {
++      if (
++        part.type === "timeline" ||
++        part.type === "step-start" ||
++        part.type === "step-finish"
++      ) {
++        continue;
++      }
++      if (part.type === "text" || part.type === "reasoning") {
++        if (typeof part.text !== "string") {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "Persisted text part is malformed"
++          );
++        }
++        result.push(
++          part.type === "reasoning"
++            ? { type: "reasoning", text: part.text }
++            : message.info.role === "user"
++            ? {
++                type: "user_message",
++                text: part.text,
++                messageId: message.info.messageId,
++              }
++            : {
++                type: "assistant_message",
++                text: part.text,
++                messageId: message.info.messageId,
++              }
++        );
++        continue;
++      }
++      if (part.type === "file") {
++        if (typeof part.url !== "string") {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "Persisted file part is malformed"
++          );
++        }
++        const label =
++          typeof part.filename === "string" ? part.filename : "file";
++        const text = `[${label}](${part.url})`;
++        result.push(
++          message.info.role === "user"
++            ? { type: "user_message", text, messageId: message.info.messageId }
++            : {
++                type: "assistant_message",
++                text,
++                messageId: message.info.messageId,
++              }
++        );
++        continue;
++      }
++      if (part.type === "tool") {
++        const callId =
++          typeof part.callId === "string" ? part.callId : undefined;
++        const name = typeof part.tool === "string" ? part.tool : undefined;
++        const state = record(part.state);
++        if (callId === undefined || name === undefined) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "Persisted tool part is malformed"
++          );
++        }
++        const status =
++          state.status === "completed"
++            ? "completed"
++            : state.status === "error"
++            ? "failed"
++            : state.status === "running" || state.status === "pending"
++            ? "running"
++            : undefined;
++        if (status === undefined) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "Persisted tool status is unknown"
++          );
++        }
++        const output = state.output ?? state.error ?? null;
++        const detail: ToolCallDetail = {
++          type: "unknown",
++          input: state.input,
++          output,
++        };
++        result.push(
++          status === "failed"
++            ? { type: "tool_call", callId, name, detail, status, error: output }
++            : { type: "tool_call", callId, name, detail, status, error: null }
++        );
++        continue;
++      }
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Unsupported persisted message part: ${part.type}`
++      );
++    }
++  }
++  if (snapshot.todos !== undefined) {
++    result.push({
++      type: "todo",
++      items: snapshot.todos.map((todo) =>
++        Object.assign(
++          {
++            text: todo.content,
++            completed: todo.status === "completed",
++            status: todo.status,
++          },
++          { priority: todo.priority }
++        )
++      ),
++    });
++  }
++  return result;
++}
++
++export interface QuestionField {
++  header: string;
++  question: string;
++  multiSelect: boolean;
++  valuesByLabel: Map<string, string>;
++}
++
++export function mapQuestionRequest(
++  request: UserInputRequest,
++  id: string
++): { request: AgentPermissionRequest; fields: QuestionField[] } {
++  if (request.questions === undefined || request.questions.length === 0) {
++    throw new AdapterError(
++      "INTERACTION_UNSUPPORTED",
++      "ZCode question has no fields"
++    );
++  }
++  const headers = new Set<string>();
++  const fields: QuestionField[] = request.questions.map((question) => {
++    if (headers.has(question.header)) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode question headers must be unique"
++      );
++    }
++    headers.add(question.header);
++    const valuesByLabel = new Map<string, string>();
++    const values = new Set<string>();
++    for (const option of question.options) {
++      if (
++        option.label.trim() === "" ||
++        option.value === "" ||
++        valuesByLabel.has(option.label) ||
++        values.has(option.value) ||
++        (question.multiSelect === true && option.label.includes(", "))
++      ) {
++        throw new AdapterError(
++          "NATIVE_PROTOCOL_ERROR",
++          "ZCode question options are not reversibly representable"
++        );
++      }
++      valuesByLabel.set(option.label, option.value);
++      values.add(option.value);
++    }
++    if (valuesByLabel.size === 0) {
++      throw new AdapterError(
++        "INTERACTION_UNSUPPORTED",
++        "ZCode free-form question is unsupported by this native contract"
++      );
++    }
++    return {
++      header: question.header,
++      question: question.question,
++      multiSelect: question.multiSelect === true,
++      valuesByLabel,
++    };
++  });
++  return {
++    fields,
++    request: {
++      id,
++      provider: ZCODE_PROVIDER_ID,
++      name: "ZCodeQuestion",
++      kind: "question",
++      title: request.prompt ?? "Question",
++      input: {
++        questions: request.questions.map((question) => ({
++          question: question.question,
++          header: question.header,
++          options: question.options.map((option) => ({
++            label: option.label,
++            ...(option.description === undefined
++              ? {}
++              : { description: option.description }),
++          })),
++          multiSelect: question.multiSelect === true,
++          allowOther: false,
++          allowEmpty: false,
++          dismissLabel: "Dismiss",
++        })),
++      },
++    },
++  };
++}
++
++export function questionContent(
++  fields: QuestionField[],
++  answers: unknown
++): Record<string, unknown> {
++  const answerRecord = record(answers);
++  const content: Record<string, unknown> = {};
++  const nativeAnswers: Record<string, string[]> = {};
++  fields.forEach((field, index) => {
++    const answer = answerRecord[field.header];
++    if (typeof answer !== "string" || answer === "") {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Missing answer for ZCode question '${field.header}'`
++      );
++    }
++    const labels = field.multiSelect ? answer.split(", ") : [answer];
++    if (
++      labels.length === 0 ||
++      new Set(labels).size !== labels.length ||
++      labels.some((label) => label === "")
++    ) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode answer is ambiguous"
++      );
++    }
++    const values = labels.map((label) => {
++      const value = field.valuesByLabel.get(label);
++      if (value === undefined) {
++        throw new AdapterError(
++          "NATIVE_PROTOCOL_ERROR",
++          "ZCode answer contains an unknown option"
++        );
++      }
++      return value;
++    });
++    content[`answer_${index}`] = field.multiSelect ? values : values[0];
++    nativeAnswers[field.question] = values;
++    if (index === 0) content.answer = field.multiSelect ? values : values[0];
++  });
++  content.answers = nativeAnswers;
++  return content;
++}
++
++export function permissionActions(
++  request: PermissionRequest,
++  requireBoth = false
++): AgentPermissionAction[] {
++  let allow = false;
++  let deny = false;
++  const actions = request.options.map((option) => {
++    if (
++      option.response.decision !== "allow" &&
++      option.response.decision !== "deny"
++    ) {
++      throw new AdapterError(
++        "INTERACTION_UNSUPPORTED",
++        `ZCode permission decision is unsupported: ${option.response.decision}`
++      );
++    }
++    allow ||= option.response.decision === "allow";
++    deny ||= option.response.decision === "deny";
++    return {
++      id: option.optionId,
++      label: option.name,
++      behavior: option.response.decision,
++      variant: option.response.decision === "deny" ? "danger" : "primary",
++      ...(option.response.decision === "deny"
++        ? { intent: "dismiss" as const }
++        : {}),
++    } satisfies AgentPermissionAction;
++  });
++  if (!deny || (requireBoth && !allow)) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      requireBoth
++        ? "ZCode plan approval must provide allow and deny options"
++        : "ZCode permission must provide a deny option"
++    );
++  }
++  return actions;
++}
++
++export function planMarkdown(input: unknown): string {
++  const plan = record(input).plan;
++  if (typeof plan !== "string" || plan.trim() === "") {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      "ZCode plan approval has no Markdown"
++    );
++  }
++  return plan.trim();
++}
++
++export function record(value: unknown): Record<string, unknown> {
++  return value !== null && typeof value === "object" && !Array.isArray(value)
++    ? (value as Record<string, unknown>)
++    : {};
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/ndjson.test.ts b/packages/server/src/server/agent/providers/zcode/ndjson.test.ts
+new file mode 100644
+index 0000000..72394e5
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/ndjson.test.ts
+@@ -0,0 +1,56 @@
++import { describe, expect, test } from "vitest";
++import { readNdjson } from "./protocol/ndjson.js";
++
++describe("native NDJSON framing", () => {
++  test("handles partial chunks, CRLF, and empty lines", async () => {
++    const stream = streamFromChunks(['{"id":', '1}\r\n\n{"id":2}\n']);
++    expect(await collect(stream)).toEqual([{ id: 1 }, { id: 2 }]);
++  });
++
++  test("accepts a final frame without a newline", async () => {
++    expect(await collect(streamFromChunks(['{"ok":true}']))).toEqual([
++      { ok: true },
++    ]);
++  });
++
++  test("rejects non-JSON stdout", async () => {
++    await expect(
++      collect(streamFromChunks(["not json\n"]))
++    ).rejects.toMatchObject({
++      code: "NATIVE_PROTOCOL_ERROR",
++    });
++  });
++
++  test("rejects oversized frames", async () => {
++    await expect(
++      collect(streamFromChunks(['{"value":"large"}\n']), 4)
++    ).rejects.toMatchObject({
++      code: "NATIVE_PROTOCOL_ERROR",
++    });
++  });
++});
++
++function streamFromChunks(
++  chunks: readonly string[]
++): ReadableStream<Uint8Array> {
++  const encoder = new TextEncoder();
++  return new ReadableStream({
++    start(controller) {
++      for (const chunk of chunks) {
++        controller.enqueue(encoder.encode(chunk));
++      }
++      controller.close();
++    },
++  });
++}
++
++async function collect(
++  stream: ReadableStream<Uint8Array>,
++  maxBytes?: number
++): Promise<unknown[]> {
++  const values: unknown[] = [];
++  for await (const value of readNdjson(stream, maxBytes)) {
++    values.push(value);
++  }
++  return values;
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/protocol/client.ts b/packages/server/src/server/agent/providers/zcode/protocol/client.ts
+new file mode 100644
+index 0000000..f159900
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/protocol/client.ts
+@@ -0,0 +1,278 @@
++import type { z } from "zod";
++import { AdapterError } from "../errors.js";
++import type { Logger } from "../logger.js";
++import {
++  NativeEnvelopeSchema,
++  type NativeEnvelope,
++  type NativeNotification,
++  type NativeRequest,
++} from "./v1/schemas.js";
++import { readNdjson } from "./ndjson.js";
++
++export interface NativeTransport {
++  readonly readable: ReadableStream<Uint8Array>;
++  write(frame: string): Promise<void>;
++  close(): Promise<void>;
++}
++
++export type ReverseRequestHandler = (
++  request: NativeRequest
++) => Promise<unknown>;
++export type NotificationHandler = (
++  notification: NativeNotification
++) => Promise<void> | void;
++
++export interface NativeRequestDiagnosticContext {
++  readonly operation: string;
++  readonly sessionId?: string;
++  readonly inputId?: string;
++}
++
++export const MAX_PENDING_NATIVE_REQUESTS = 1_024;
++export const MAX_QUEUED_NATIVE_NOTIFICATIONS = 1_024;
++
++interface PendingRequest {
++  readonly method: string;
++  readonly parse: (value: unknown) => unknown;
++  readonly resolve: (value: unknown) => void;
++  readonly reject: (error: unknown) => void;
++  readonly timer: ReturnType<typeof setTimeout>;
++}
++
++export class ZCodeProtocolClient {
++  private nextRequestId = 1;
++  private readonly pending = new Map<string, PendingRequest>();
++  private readLoop: Promise<void> | undefined;
++  private notificationQueue: Promise<void> = Promise.resolve();
++  private queuedNotificationCount = 0;
++  private closed = false;
++
++  constructor(
++    private readonly transport: NativeTransport,
++    private readonly logger: Logger,
++    private readonly reverseRequestHandler?: ReverseRequestHandler,
++    private readonly notificationHandler?: NotificationHandler
++  ) {}
++
++  start(): void {
++    if (this.readLoop !== undefined) {
++      return;
++    }
++    this.readLoop = this.runReadLoop();
++    void this.readLoop.catch(() => undefined);
++  }
++
++  async request<Schema extends z.ZodType>(
++    method: string,
++    params: unknown,
++    resultSchema: Schema,
++    timeoutMs = 30_000,
++    diagnosticContext?: NativeRequestDiagnosticContext
++  ): Promise<z.output<Schema>> {
++    if (this.closed) {
++      throw new AdapterError(
++        "NATIVE_EXITED",
++        "Native protocol transport is closed"
++      );
++    }
++    if (this.pending.size >= MAX_PENDING_NATIVE_REQUESTS) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Native pending request limit exceeded: ${MAX_PENDING_NATIVE_REQUESTS}`
++      );
++    }
++    this.start();
++
++    const id = this.nextRequestId++;
++    const key = String(id);
++    const response = new Promise<z.output<Schema>>((resolve, reject) => {
++      const timer = setTimeout(() => {
++        this.pending.delete(key);
++        reject(
++          new AdapterError(
++            "NATIVE_TIMEOUT",
++            `Native request timed out: ${method}`,
++            {
++              method,
++              timeoutMs,
++            }
++          )
++        );
++      }, timeoutMs);
++
++      this.pending.set(key, {
++        method,
++        parse: (value) => resultSchema.parse(value),
++        resolve: (value) => resolve(value as z.output<Schema>),
++        reject,
++        timer,
++      });
++    });
++
++    const writeStartedAt = performance.now();
++    if (diagnosticContext !== undefined) {
++      this.logger.log("debug", "zcode.native_request.write.started", {
++        ...diagnosticContext,
++        nativeRequestId: id,
++      });
++    }
++    try {
++      await this.transport.write(`${JSON.stringify({ id, method, params })}\n`);
++      if (diagnosticContext !== undefined) {
++        this.logger.log("debug", "zcode.native_request.write.completed", {
++          ...diagnosticContext,
++          nativeRequestId: id,
++          durationMs: elapsedMs(writeStartedAt),
++        });
++      }
++    } catch (error) {
++      if (diagnosticContext !== undefined) {
++        this.logger.error("zcode.native_request.write.failed", error, {
++          ...diagnosticContext,
++          nativeRequestId: id,
++          durationMs: elapsedMs(writeStartedAt),
++        });
++      }
++      const pending = this.pending.get(key);
++      if (pending !== undefined) {
++        clearTimeout(pending.timer);
++        this.pending.delete(key);
++        pending.reject(error);
++      }
++    }
++    return response;
++  }
++
++  async close(): Promise<void> {
++    if (this.closed) {
++      return;
++    }
++    this.closed = true;
++    await this.transport.close();
++    this.rejectAll(
++      new AdapterError("NATIVE_EXITED", "Native protocol transport closed")
++    );
++    void this.readLoop?.catch(() => undefined);
++  }
++
++  private async runReadLoop(): Promise<void> {
++    try {
++      for await (const value of readNdjson(this.transport.readable)) {
++        await this.handleEnvelope(NativeEnvelopeSchema.parse(value));
++      }
++      if (!this.closed) {
++        throw new AdapterError(
++          "NATIVE_EXITED",
++          "Native stdout closed unexpectedly"
++        );
++      }
++    } catch (error) {
++      this.closed = true;
++      this.rejectAll(error);
++      this.logger.error("zcode.transport.failed", error);
++      await this.transport.close().catch((closeError) => {
++        this.logger.error("zcode.transport.close_failed", closeError);
++      });
++      throw error;
++    }
++  }
++
++  private async handleEnvelope(envelope: NativeEnvelope): Promise<void> {
++    if ("method" in envelope && "id" in envelope) {
++      await this.handleReverseRequest(envelope);
++      return;
++    }
++    if ("method" in envelope) {
++      if (this.notificationHandler !== undefined) {
++        if (
++          this.queuedNotificationCount >= MAX_QUEUED_NATIVE_NOTIFICATIONS
++        ) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            `Native notification backlog limit exceeded: ${MAX_QUEUED_NATIVE_NOTIFICATIONS}`
++          );
++        }
++        this.queuedNotificationCount += 1;
++        this.notificationQueue = this.notificationQueue.then(() =>
++          this.notificationHandler!(envelope)
++        );
++        void this.notificationQueue.then(
++          () => {
++            this.queuedNotificationCount -= 1;
++          },
++          (error) => {
++            this.queuedNotificationCount -= 1;
++            if (this.closed) return;
++            this.closed = true;
++            this.rejectAll(error);
++            this.logger.error("zcode.notification.failed", error);
++            void this.transport.close().catch((closeError) => {
++              this.logger.error("zcode.transport.close_failed", closeError);
++            });
++          }
++        );
++      }
++      return;
++    }
++
++    const pending = this.pending.get(String(envelope.id));
++    if (pending === undefined) {
++      this.logger.log("warn", "zcode.response.late_or_unknown", {
++        responseId: envelope.id,
++      });
++      return;
++    }
++    this.pending.delete(String(envelope.id));
++    clearTimeout(pending.timer);
++
++    if ("error" in envelope) {
++      pending.reject(
++        new AdapterError("NATIVE_PROTOCOL_ERROR", envelope.error.message, {
++          method: pending.method,
++          nativeCode: envelope.error.code,
++        })
++      );
++      return;
++    }
++
++    try {
++      pending.resolve(pending.parse(envelope.result));
++    } catch (error) {
++      pending.reject(
++        new AdapterError(
++          "NATIVE_PROTOCOL_ERROR",
++          `Native result validation failed: ${pending.method}`,
++          { method: pending.method },
++          { cause: error }
++        )
++      );
++    }
++  }
++
++  private async handleReverseRequest(request: NativeRequest): Promise<void> {
++    if (this.reverseRequestHandler === undefined) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        `Unsupported native reverse request: ${request.method}`,
++        { method: request.method }
++      );
++    }
++
++    const result = await this.reverseRequestHandler(request);
++    await this.transport.write(
++      `${JSON.stringify({ id: request.id, result })}\n`
++    );
++  }
++
++  private rejectAll(error: unknown): void {
++    for (const pending of this.pending.values()) {
++      clearTimeout(pending.timer);
++      pending.reject(error);
++    }
++    this.pending.clear();
++  }
++}
++
++function elapsedMs(startedAt: number): number {
++  return Math.round((performance.now() - startedAt) * 1_000) / 1_000;
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/protocol/ndjson.ts b/packages/server/src/server/agent/providers/zcode/protocol/ndjson.ts
+new file mode 100644
+index 0000000..6defb14
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/protocol/ndjson.ts
+@@ -0,0 +1,100 @@
++import { AdapterError } from "../errors.js";
++
++export const DEFAULT_MAX_NATIVE_FRAME_BYTES = 16 * 1024 * 1024;
++
++export async function* readNdjson(
++  readable: ReadableStream<Uint8Array>,
++  maxFrameBytes = DEFAULT_MAX_NATIVE_FRAME_BYTES
++): AsyncGenerator<unknown> {
++  const reader = readable.getReader();
++  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
++
++  try {
++    while (true) {
++      const result = await reader.read();
++      if (result.done) {
++        break;
++      }
++      pending = concatBytes(pending, result.value);
++
++      let newline: number;
++      while ((newline = pending.indexOf(0x0a)) !== -1) {
++        const line = pending.slice(0, newline);
++        pending = pending.slice(newline + 1);
++        yield* parseLine(stripTrailingCarriageReturn(line), maxFrameBytes);
++      }
++
++      if (pending.byteLength > maxFrameBytes) {
++        throw frameTooLarge(maxFrameBytes);
++      }
++    }
++
++    if (pending.byteLength > 0) {
++      yield* parseLine(stripTrailingCarriageReturn(pending), maxFrameBytes);
++    }
++  } finally {
++    reader.releaseLock();
++  }
++}
++
++function* parseLine(
++  line: Uint8Array<ArrayBufferLike>,
++  maxFrameBytes: number
++): Generator<unknown> {
++  if (line.byteLength === 0) {
++    return;
++  }
++  if (line.byteLength > maxFrameBytes) {
++    throw frameTooLarge(maxFrameBytes);
++  }
++
++  let text: string;
++  try {
++    text = new TextDecoder("utf-8", { fatal: true }).decode(line);
++  } catch (error) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      "Native protocol contained invalid UTF-8",
++      {},
++      { cause: error }
++    );
++  }
++
++  if (text.trim().length === 0) {
++    return;
++  }
++
++  try {
++    yield JSON.parse(text) as unknown;
++  } catch (error) {
++    throw new AdapterError(
++      "NATIVE_PROTOCOL_ERROR",
++      "Native stdout contained a non-JSON frame",
++      {},
++      { cause: error }
++    );
++  }
++}
++
++function stripTrailingCarriageReturn(
++  value: Uint8Array<ArrayBufferLike>
++): Uint8Array<ArrayBufferLike> {
++  return value.at(-1) === 0x0d ? value.slice(0, -1) : value;
++}
++
++function concatBytes(
++  left: Uint8Array<ArrayBufferLike>,
++  right: Uint8Array<ArrayBufferLike>
++): Uint8Array<ArrayBufferLike> {
++  const result = new Uint8Array(left.byteLength + right.byteLength);
++  result.set(left);
++  result.set(right, left.byteLength);
++  return result;
++}
++
++function frameTooLarge(maxFrameBytes: number): AdapterError {
++  return new AdapterError(
++    "NATIVE_PROTOCOL_ERROR",
++    `Native protocol frame exceeded ${maxFrameBytes} bytes`
++  );
++}
+diff --git a/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts b/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts
+new file mode 100644
+index 0000000..da00d00
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts
+@@ -0,0 +1,251 @@
++import { z } from "zod";
++
++const RecordSchema = z.record(z.string(), z.unknown());
++
++export const InitializeResultSchema = z
++  .object({
++    available: z.boolean(),
++    workspaceKey: z.string().min(1).optional(),
++    protocolName: z.string().optional(),
++    protocolVersion: z.number().int().optional(),
++    transportKind: z.string().optional(),
++    reason: z.string().optional(),
++    reasonCode: z.string().optional(),
++  })
++  .passthrough();
++
++const ModelRefSchema = z
++  .object({
++    providerId: z.string().min(1),
++    modelId: z.string().min(1),
++    variant: z.string().min(1).nullable().optional(),
++  })
++  .passthrough();
++
++const ModelOptionSchema = z
++  .object({
++    ref: ModelRefSchema,
++    label: z.string().min(1),
++    providerLabel: z.string().optional(),
++  })
++  .passthrough();
++
++const ThoughtLevelOptionSchema = z
++  .object({ value: z.string().min(1), label: z.string().min(1) })
++  .passthrough();
++
++export const SessionSettingsSchema = z
++  .object({
++    model: z.object({ current: ModelRefSchema, available: z.array(ModelOptionSchema) }).passthrough(),
++    thoughtLevel: z
++      .object({
++        enabled: z.boolean(),
++        current: z.string().optional(),
++        available: z.array(ThoughtLevelOptionSchema),
++      })
++      .passthrough(),
++    mode: z.object({ current: z.string().min(1) }).passthrough(),
++  })
++  .passthrough();
++
++export const WorkspaceStateResultSchema = z
++  .object({
++    workspace: z.object({ workspacePath: z.string().min(1) }).passthrough(),
++    settings: SessionSettingsSchema,
++    modelCatalog: z
++      .object({ providers: z.array(z.unknown()), available: z.array(z.unknown()) })
++      .passthrough()
++      .optional(),
++  })
++  .passthrough();
++
++export const SessionSnapshotSchema = z
++  .object({
++    session: z
++      .object({
++        sessionId: z.string().min(1),
++        status: z.string(),
++        workspace: z.object({ workspacePath: z.string().min(1) }).passthrough(),
++        title: z.string().optional(),
++        updatedAt: z.number().optional(),
++      })
++      .passthrough(),
++    settings: SessionSettingsSchema,
++    messages: z.array(
++      z.object({
++        info: z.object({
++          messageId: z.string().min(1),
++          role: z.enum(["user", "assistant"]),
++        }).passthrough(),
++        parts: z.array(z.object({ type: z.string().min(1) }).passthrough()),
++      }).passthrough(),
++    ),
++    runtime: z.object({
++      contextUsage: z.object({
++        used: z.number().int().nonnegative(),
++        size: z.number().int().positive(),
++        cost: z.object({ amount: z.number().nonnegative(), currency: z.string().min(1) }).nullable().optional(),
++      }).passthrough().optional(),
++    }).passthrough(),
++    todos: z.array(z.object({
++      content: z.string(),
++      status: z.enum(["pending", "in_progress", "completed"]),
++      priority: z.enum(["high", "medium", "low"]),
++    }).strict()).optional(),
++    slashCommands: z.array(
++      z.object({
++        name: z.string().min(1),
++        description: z.string(),
++        inputHint: z.string().optional(),
++      }).passthrough(),
++    ),
++  })
++  .passthrough();
++
++export const SessionListSchema = z.array(
++  z.object({
++    sessionId: z.string().min(1),
++    workspace: z.object({ workspacePath: z.string().min(1) }).passthrough(),
++    title: z.string().optional(),
++    updatedAt: z.number().optional(),
++  }).passthrough(),
++);
++
++export const SendPromptResultSchema = z
++  .object({ sessionId: z.string().min(1), accepted: z.literal(true) })
++  .passthrough();
++
++export const TokenUsageSchema = z.object({
++  sessionId: z.string().min(1),
++  totalTokens: z.number().int().nonnegative(),
++  inputTokens: z.number().int().nonnegative(),
++  outputTokens: z.number().int().nonnegative(),
++  reasoningTokens: z.number().int().nonnegative(),
++  cacheCreationTokens: z.number().int().nonnegative(),
++  cacheReadTokens: z.number().int().nonnegative(),
++}).passthrough();
++
++export const BooleanResultSchema = z.boolean();
++export const UnknownResultSchema = z.unknown();
++
++const PermissionResponseSchema = z
++  .object({
++    decision: z.enum(["allow", "deny", "escalate", "modify"]),
++    reason: z.string().optional(),
++    modifiedInput: z.unknown().optional(),
++    permissionUpdates: z.array(z.unknown()).optional(),
++  })
++  .strict();
++
++const PermissionOptionSchema = z
++  .object({
++    optionId: z.string().min(1),
++    kind: z.string().min(1),
++    name: z.string().min(1),
++    description: z.string().optional(),
++    response: PermissionResponseSchema,
++  })
++  .strict();
++
++export const PermissionRequestSchema = z
++  .object({
++    requestId: z.string().min(1),
++    sessionId: z.string().min(1),
++    turnId: z.string().optional(),
++    toolCallId: z.string().min(1),
++    toolName: z.string().min(1),
++    reason: z.string(),
++    riskLevel: z.enum(["low", "medium", "high", "critical"]),
++    input: z.unknown(),
++    origin: z.unknown().optional(),
++    options: z.array(PermissionOptionSchema).min(1),
++  })
++  .strict();
++
++const UserQuestionSchema = z
++  .object({
++    question: z.string().min(1),
++    header: z.string().min(1),
++    options: z.array(
++      z
++        .object({
++          value: z.string(),
++          label: z.string(),
++          description: z.string().optional(),
++          preview: z.string().optional(),
++        })
++        .strict(),
++    ),
++    multiSelect: z.boolean().optional(),
++  })
++  .strict();
++
++export const UserInputRequestSchema = z
++  .object({
++    requestId: z.string().min(1),
++    sessionId: z.string().min(1),
++    turnId: z.string().optional(),
++    toolCallId: z.string().optional(),
++    toolName: z.string().optional(),
++    prompt: z.string().optional(),
++    questions: z.array(UserQuestionSchema).optional(),
++    input: z.unknown().optional(),
++    origin: z.unknown().optional(),
++    schema: z.unknown().optional(),
++  })
++  .strict();
++
++export const ProviderRuntimeHeadersRequestSchema = z
++  .object({
++    requestId: z.string().min(1),
++    sessionId: z.string().min(1),
++    turnId: z.string().optional(),
++    workspace: z.object({ workspacePath: z.string().min(1) }).passthrough(),
++    modelRef: ModelRefSchema,
++    providerId: z.string().min(1),
++    reason: z.enum(["model-request", "captcha-retry"]),
++  })
++  .strict();
++
++export const SessionEventSchema = z
++  .object({
++    eventId: z.string().min(1),
++    sessionId: z.string().min(1),
++    turnId: z.string().optional(),
++    seq: z.number().int().nonnegative(),
++    traceId: z.string().optional(),
++    timestamp: z.number(),
++    deliveryKind: z.string(),
++    type: z.string().min(1),
++    payload: RecordSchema,
++  })
++  .strict();
++
++export const DynamicEventSchema = z.discriminatedUnion("type", [
++  z.object({ type: z.literal("snapshot"), snapshot: SessionSnapshotSchema }).strict(),
++  z.object({ type: z.literal("state.updated"), notification: z.unknown() }).strict(),
++  z.object({ type: z.literal("permission.request"), request: PermissionRequestSchema }).strict(),
++  z.object({ type: z.literal("userInput.request"), request: UserInputRequestSchema }).strict(),
++  z
++    .object({
++      type: z.literal("userInput.response"),
++      requestId: z.string(),
++      response: z.unknown(),
++    })
++    .strict(),
++  z
++    .object({
++      type: z.literal("providerRuntimeHeaders.request"),
++      request: ProviderRuntimeHeadersRequestSchema,
++    })
++    .strict(),
++  z.object({ type: z.literal("session.event"), event: SessionEventSchema }).strict(),
++]);
++
++export type DynamicEvent = z.infer<typeof DynamicEventSchema>;
++export type SessionSnapshot = z.infer<typeof SessionSnapshotSchema>;
++export type SessionSettings = z.infer<typeof SessionSettingsSchema>;
++export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;
++export type PermissionResponse = z.infer<typeof PermissionResponseSchema>;
++export type UserInputRequest = z.infer<typeof UserInputRequestSchema>;
++export type SessionEvent = z.infer<typeof SessionEventSchema>;
+diff --git a/packages/server/src/server/agent/providers/zcode/protocol/v1/schemas.ts b/packages/server/src/server/agent/providers/zcode/protocol/v1/schemas.ts
+new file mode 100644
+index 0000000..731659c
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/protocol/v1/schemas.ts
+@@ -0,0 +1,66 @@
++import { z } from "zod";
++
++export const NativeIdSchema = z.union([z.string().min(1), z.number().int()]);
++
++export const NativeRequestSchema = z
++  .object({
++    id: NativeIdSchema,
++    method: z.string().min(1),
++    params: z.unknown().optional(),
++    trace: z
++      .object({
++        traceId: z.string().min(1).optional(),
++        parentId: z.string().min(1).optional(),
++        spanId: z.string().min(1).optional(),
++        traceparent: z.string().min(1).optional(),
++      })
++      .strict()
++      .optional(),
++  })
++  .strict();
++
++export const NativeNotificationSchema = z
++  .object({
++    method: z.string().min(1),
++    params: z.unknown().optional(),
++    trace: z
++      .object({
++        traceId: z.string().min(1).optional(),
++        parentId: z.string().min(1).optional(),
++        spanId: z.string().min(1).optional(),
++        traceparent: z.string().min(1).optional(),
++      })
++      .strict()
++      .optional(),
++  })
++  .strict();
++
++export const NativeSuccessResponseSchema = z
++  .object({ id: NativeIdSchema, result: z.unknown() })
++  .strict();
++
++export const NativeErrorResponseSchema = z
++  .object({
++    id: NativeIdSchema,
++    error: z
++      .object({
++        code: z.number().int(),
++        message: z.string().min(1),
++        data: z.unknown().optional(),
++      })
++      .strict(),
++  })
++  .strict();
++
++export const NativeEnvelopeSchema = z.union([
++  NativeRequestSchema,
++  NativeNotificationSchema,
++  NativeSuccessResponseSchema,
++  NativeErrorResponseSchema,
++]);
++
++export type NativeRequest = z.infer<typeof NativeRequestSchema>;
++export type NativeNotification = z.infer<typeof NativeNotificationSchema>;
++export type NativeSuccessResponse = z.infer<typeof NativeSuccessResponseSchema>;
++export type NativeErrorResponse = z.infer<typeof NativeErrorResponseSchema>;
++export type NativeEnvelope = z.infer<typeof NativeEnvelopeSchema>;
+diff --git a/packages/server/src/server/agent/providers/zcode/protocol-client.test.ts b/packages/server/src/server/agent/providers/zcode/protocol-client.test.ts
+new file mode 100644
+index 0000000..bbf0aab
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/protocol-client.test.ts
+@@ -0,0 +1,246 @@
++import { describe, expect, test } from "vitest";
++import { z } from "zod";
++import type { Logger } from "./logger.js";
++import {
++  MAX_PENDING_NATIVE_REQUESTS,
++  MAX_QUEUED_NATIVE_NOTIFICATIONS,
++  ZCodeProtocolClient,
++  type NativeTransport,
++} from "./protocol/client.js";
++
++describe("ZCode private protocol client", () => {
++  test("correlates requests and validates results", async () => {
++    const harness = transportHarness();
++    const client = new ZCodeProtocolClient(
++      harness.transport,
++      new CaptureLogger()
++    );
++
++    const response = client.request(
++      "workspace/readState",
++      { workspace: "test" },
++      z.object({ value: z.literal("ok") }).strict()
++    );
++    await sleep(0);
++    expect(harness.writes).toEqual([
++      '{"id":1,"method":"workspace/readState","params":{"workspace":"test"}}\n',
++    ]);
++
++    await harness.send({ id: 1, result: { value: "ok" } });
++    await expect(response).resolves.toEqual({ value: "ok" });
++    await client.close();
++  });
++
++  test("times out and ignores a late response", async () => {
++    const harness = transportHarness();
++    const client = new ZCodeProtocolClient(
++      harness.transport,
++      new CaptureLogger()
++    );
++    const response = client.request("slow", {}, z.object({}).strict(), 5);
++
++    await expect(response).rejects.toMatchObject({ code: "NATIVE_TIMEOUT" });
++    await harness.send({ id: 1, result: {} });
++    await client.close();
++  });
++
++  test("fails closed on an unsupported reverse request", async () => {
++    const harness = transportHarness();
++    const client = new ZCodeProtocolClient(
++      harness.transport,
++      new CaptureLogger()
++    );
++    const pending = client.request("session/send", {}, z.object({}).strict());
++    await harness.send({ id: 42, method: "interaction/unknown", params: {} });
++
++    await expect(pending).rejects.toMatchObject({
++      code: "NATIVE_PROTOCOL_ERROR",
++    });
++  });
++
++  test("keeps reading while an ordered notification handler performs a nested request", async () => {
++    const harness = transportHarness();
++    const handled = Promise.withResolvers<void>();
++    let client!: ZCodeProtocolClient;
++    client = new ZCodeProtocolClient(
++      harness.transport,
++      new CaptureLogger(),
++      undefined,
++      async () => {
++        await client.request(
++          "session/read",
++          {},
++          z.object({ ok: z.literal(true) }).strict()
++        );
++        handled.resolve();
++      }
++    );
++    client.start();
++
++    await harness.send({ method: "event", params: {} });
++    await sleep(0);
++    expect(harness.writes).toEqual([
++      '{"id":1,"method":"session/read","params":{}}\n',
++    ]);
++    await harness.send({ id: 1, result: { ok: true } });
++    await handled.promise;
++    await client.close();
++  });
++
++  test("records native stdio write timing without logging request contents", async () => {
++    const harness = transportHarness();
++    const writeStarted = Promise.withResolvers<void>();
++    const releaseWrite = Promise.withResolvers<void>();
++    const logger = new CaptureLogger();
++    const transport: NativeTransport = {
++      readable: harness.transport.readable,
++      async write(frame) {
++        writeStarted.resolve();
++        await releaseWrite.promise;
++        harness.writes.push(frame);
++      },
++      close: () => harness.transport.close(),
++    };
++    const client = new ZCodeProtocolClient(transport, logger);
++
++    const response = client.request(
++      "__call",
++      { content: "PROMPT_MUST_NOT_BE_LOGGED" },
++      z.object({ accepted: z.literal(true) }).strict(),
++      1_000,
++      { operation: "sendPrompt", sessionId: "session-1", inputId: "input-1" }
++    );
++    await writeStarted.promise;
++    expect(logger.events("zcode.native_request.write.started")).toHaveLength(1);
++    expect(logger.events("zcode.native_request.write.completed")).toHaveLength(
++      0
++    );
++
++    await sleep(10);
++    releaseWrite.resolve();
++    await sleep(0);
++    const completed = logger.events("zcode.native_request.write.completed");
++    expect(completed).toHaveLength(1);
++    expect(completed[0]?.data).toMatchObject({
++      operation: "sendPrompt",
++      sessionId: "session-1",
++      inputId: "input-1",
++      nativeRequestId: 1,
++    });
++    expect(Number(completed[0]?.data.durationMs)).toBeGreaterThanOrEqual(5);
++    expect(JSON.stringify(logger.records)).not.toContain(
++      "PROMPT_MUST_NOT_BE_LOGGED"
++    );
++
++    await harness.send({ id: 1, result: { accepted: true } });
++    await expect(response).resolves.toEqual({ accepted: true });
++    await client.close();
++  });
++
++  test("fails closed when the pending request limit is reached", async () => {
++    const harness = transportHarness();
++    const client = new ZCodeProtocolClient(
++      harness.transport,
++      new CaptureLogger()
++    );
++    const requests = Array.from(
++      { length: MAX_PENDING_NATIVE_REQUESTS },
++      (_, index) =>
++        client
++          .request(`pending-${index}`, {}, z.object({}).strict())
++          .catch(() => undefined)
++    );
++
++    await expect(
++      client.request("one-too-many", {}, z.object({}).strict())
++    ).rejects.toMatchObject({ code: "NATIVE_PROTOCOL_ERROR" });
++
++    await client.close();
++    await Promise.all(requests);
++  });
++
++  test("fails closed when the ordered notification backlog limit is reached", async () => {
++    const harness = transportHarness();
++    const releaseHandler = Promise.withResolvers<void>();
++    const logger = new CaptureLogger();
++    const client = new ZCodeProtocolClient(
++      harness.transport,
++      logger,
++      undefined,
++      async () => await releaseHandler.promise
++    );
++    client.start();
++
++    for (let index = 0; index <= MAX_QUEUED_NATIVE_NOTIFICATIONS; index += 1) {
++      await harness.send({ method: "event", params: { index } });
++    }
++    await sleep(0);
++
++    expect(logger.events("zcode.transport.failed")).toHaveLength(1);
++    expect(logger.events("zcode.transport.failed")[0]?.data).toMatchObject({
++      error: { code: "NATIVE_PROTOCOL_ERROR" },
++    });
++    releaseHandler.resolve();
++  });
++});
++
++type LogLevel = Parameters<Logger["log"]>[0];
++
++class CaptureLogger implements Logger {
++  readonly records: Array<{
++    level: LogLevel;
++    event: string;
++    data: Record<string, unknown>;
++  }> = [];
++
++  log(
++    level: LogLevel,
++    event: string,
++    data: Record<string, unknown> = {}
++  ): void {
++    this.records.push({ level, event, data });
++  }
++
++  error(
++    event: string,
++    error: unknown,
++    data: Record<string, unknown> = {}
++  ): void {
++    this.log("error", event, { ...data, error });
++  }
++
++  events(event: string): typeof this.records {
++    return this.records.filter((record) => record.event === event);
++  }
++}
++
++function sleep(ms: number): Promise<void> {
++  return new Promise((resolve) => setTimeout(resolve, ms));
++}
++
++function transportHarness(): {
++  transport: NativeTransport;
++  writes: string[];
++  send(value: unknown): Promise<void>;
++} {
++  const input = new TransformStream<Uint8Array, Uint8Array>();
++  const inputWriter = input.writable.getWriter();
++  const writes: string[] = [];
++  const encoder = new TextEncoder();
++
++  return {
++    transport: {
++      readable: input.readable,
++      async write(frame) {
++        writes.push(frame);
++      },
++      async close() {
++        await inputWriter.close();
++      },
++    },
++    writes,
++    async send(value) {
++      await inputWriter.write(encoder.encode(`${JSON.stringify(value)}\n`));
++    },
++  };
++}

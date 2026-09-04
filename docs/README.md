@@ -2,7 +2,7 @@
 
 最終更新: 2026-09-05
 
-状態: **設計完了・未実装**
+状態: **実装・ローカルアプリ検証完了**
 
 `paseo-zcode-patcher` は、公式 Paseo Desktop にZCode専用の組み込みプロバイダーを追加した、破棄可能なアプリコピーを生成するパッチャーである。ZCodeとの通信にACPを使わず、インストール済みZCodeの公式host serviceをPaseo serverから直接利用する。
 
@@ -25,7 +25,7 @@
 - [パッチ・ビルド・配布仕様](patching-and-release.md): overlay、ASAR、アプリコピー、署名
 - [Testing and compatibility](testing-compatibility.md): test、実機確認、version更新手順
 - [Security and licensing](security-and-licensing.md): 権限、credential、ログ、配布境界
-- [Implementation status](implementation-status.md): 未実装項目と実装完了条件
+- [Implementation status](implementation-status.md): 実装済み範囲、生成 hash、実機証拠、残るローカル確認
 - [References](references.md): 根拠にしたsource、commit、文書
 - [ADR一覧](adr/README.md): 採用済みの設計判断
 
@@ -40,4 +40,6 @@
 | `paseo-acp-patcher`参照commit | `6c5c824e6eaa581f90cb1e809e1a59d61d2740f4` |
 | `zcode-acp`参照commit | `7b3af187d7ee732e9043aed873a863fc855625c2` |
 
-生成後ASAR、overlay、追加・置換entryのhashは、まだ実装成果物が存在しないため未生成である。実装完了時にmanifestへ固定し、文書の状態を「実装済み」へ変更する。
+生成済み overlay は 18 entry で、overlay SHA-256 は `b36053467b49dc2765680386f7754b2e8889e0df982baa2bf3dc1f3961b7c38a`、生成後 ASAR SHA-256 は `c3ae45ec6850146905e27bd897504acdceb4463bdecc293adab7f36eaeec182e` である。entry ごとの hash は `artifacts/paseo-0.7.2-arm64/manifest.json` を正とする。
+
+provider と `/Applications/PaseoZCode.app` の実機検証は完了している。生成 hash、strict 署名、3 回の独立 cold start、ZCode の利用可能表示、PlanCard の画面確認結果は [Implementation status](implementation-status.md) に記録する。

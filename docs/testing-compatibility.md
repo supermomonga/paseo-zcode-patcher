@@ -136,25 +136,41 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 
 - ZCodeなし、旧/new version、host hash/export差分
 - ZCode loginなし、model providerなし
-- malformed frame、unknown event、sequence gap、child crash
+- malformed frame、unknown event、sequence duplicate/regression、child crash
 - interaction中のinterrupt、session close、daemon shutdown
 - UIからのstale/double response
 - unsupported MCP/attachment/question shape
 - PaseoまたはZCode更新後に、既存patched appがprovider unavailableを表示する
 
-## 7. Release判定
+## 7. 2026-09-05 実施結果
+
+- patcher test: 19件中18件成功、インストール済みZCodeを使う1件は通常実行ではskip。`RUN_ZCODE_RUNTIME_TEST=1`では同テストも成功。
+- overlay test: 10 file、89件成功。
+- protocol/serverの型検査とbuild、overlay entry importに成功。
+- 18 entryのoverlayを同一入力からbyte-for-byteで再生成し、manifestのhashと一致。
+- 実機providerでcatalog、短いprompt、stream、usage、session list、resume、history、cancel後のcleanupを確認。
+- Plan Dismissでworkspace不変、Plan Approveで同じturnから実装へ進むことを確認。
+- renderer、ACP route、外部`zcode-acp`実行経路がsource patchとoverlayに含まれないことを確認。
+- patcher packageの`npm audit`は0件。固定Paseo 0.7.2 sourceの`npm ci`は上流依存に101件（low 8、moderate 44、high 42、critical 7）を報告。
+- 許可された旧`zcode-acp`由来のZCode Helperを終了後、`/Applications/PaseoZCode.app`の生成に成功。生成ASARとmanifestのhash一致、元Paseo ASAR不変、strict署名を確認。
+- 異なる`PASEO_HOME`とElectron user-data directoryで3回cold startし、毎回daemonがrunningになり、終了時にlifecycle RPCで正常停止した。
+- 実画面でZCodeが「利用可能・4つのモデル」と表示され、model pickerにも4 modelが現れることを確認。
+- ZCodeの`plan` modeでMarkdown、Approve、Dismissが既存`PlanCard`に表示されることを画面で確認し、画像を記録した。Dismiss後にworkspace変更と残存processがないことを確認。
+- todoをplanとは別のtimeline eventとして`TodoListCard`へ渡すことはfocused testで確認。renderer差分はない。
+
+## 8. Release判定
 
 release可能なのは次をすべて満たす場合だけである。
 
 - patcher/overlay/providerの全自動testが成功
 - generated manifestとdocumented contractが一致
 - 実機必須シナリオが成功
-- PlanCard/todo分離を画像または動画で記録
+- PlanCard表示を画像で記録し、todo分離をfocused testで確認
 - 元アプリ不変、patched app strict署名、process cleanupを確認
 - secret fixtureがlog、ASAR、manifest、test outputに含まれない
 - unsupported versionが実行前に拒否される
 
-## 8. Version更新手順
+## 9. Version更新手順
 
 ### Paseo更新
 

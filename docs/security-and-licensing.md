@@ -57,7 +57,7 @@ interactive provider header recoveryは値を要求せず`headersApplied: false`
 
 - Zodなどのruntime schemaで全result/event/reverse requestを検証する。
 - frame size、pending request数、event backlogへ上限を設ける。
-- duplicate ID、sequence gap、unknown event、invalid transitionを拒否する。
+- duplicate ID、sequenceの重複・逆行、unknown event、invalid transitionを拒否する。delivery kindによるfilterで欠番は発生するため、増加方向のgap自体は拒否しない。
 - operation semanticsに応じたtimeoutを設け、一律短時間timeoutでmodel turnを切らない。
 - response writerを一つのqueueへ直列化する。
 - active turnをchild再起動後に再送しない。
@@ -101,13 +101,13 @@ ZCode runtimeがmodel/providerへ送るprompt、workspace情報、telemetryはZC
 
 ## 10. Security acceptance checklist
 
-- [ ] allow/deny/cancel/double-responseの自動test
-- [ ] plan approvalのsource/request/option binding test
-- [ ] secret fixtureによるlog/artifact検査
-- [ ] oversized/malformed frame test
-- [ ] path traversal/symlink/workspace binding test
-- [ ] child process cleanup test
-- [ ] unsupported Paseo/ZCode fail-closed test
-- [ ] 元アプリ不変とpatched app署名検証
-- [ ] release artifactへPaseo/ZCodeが含まれないことを確認
-- [ ] dependency license/notice確認
+- [x] allow/deny/cancel/double-responseの自動test
+- [x] plan approvalのsource/request/option binding test
+- [x] secret fixtureによるlog/artifact検査
+- [x] oversized/malformed frame、pending request上限、event backlog上限のtest
+- [x] path traversal/symlink/workspace binding test
+- [x] child process cleanup testと実機終了後のprocess確認
+- [x] unsupported Paseo/ZCode fail-closed test
+- [x] 元アプリ不変とpatched appのstrict署名検証
+- [x] release artifactへPaseo/ZCodeアプリ本体が含まれないことを確認
+- [x] dependency license/notice確認。配布license不明の参照repositoryがあるためpackageはprivate

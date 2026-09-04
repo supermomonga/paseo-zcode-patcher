@@ -141,7 +141,7 @@ providerRuntimeHeaders.request
 session.event
 ```
 
-`session.event`は`eventId`、`sessionId`、non-negative `seq`、timestamp、delivery kind、type、payloadを必須とする。現在処理するevent typeはmodel streaming、tool update、turn completed/failed、title update、および実測上のno-op lifecycle eventに限定する。
+`session.event`は`eventId`、`sessionId`、non-negative `seq`、timestamp、delivery kind、type、payloadを必須とする。`desktop-continuous`では別のdynamic eventとして配送されるeventやfilter対象eventの番号が欠けるため、`seq`は狭義単調増加を要求し、重複と逆行を拒否する。増加方向の欠番は許容する。現在処理するevent typeはmodel streaming、tool update、turn completed/failed、title update、および実測上のno-op lifecycle eventに限定する。
 
 未知typeを無視または正常終了へ丸めない。no-op扱いにするeventも、現在の検証済み一覧へ明示的に含める。
 

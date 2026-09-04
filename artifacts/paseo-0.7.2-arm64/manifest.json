@@ -1,0 +1,139 @@
+{
+  "artifactId": "paseo-0.7.2-arm64",
+  "paseo": {
+    "version": "0.7.2",
+    "commit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
+    "platform": "darwin",
+    "arch": "arm64",
+    "sourceAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
+    "patchedAsarSha256": "c3ae45ec6850146905e27bd897504acdceb4463bdecc293adab7f36eaeec182e"
+  },
+  "zcode": {
+    "appVersion": "3.11.2",
+    "cliVersion": "0.16.5",
+    "cliSha256": "e9f1868c0fdb863537ed910ee3828b9be96b8c2fd805473f63b439e1113266b8",
+    "artifact": "zcode-host-3.11.2",
+    "protocol": "zcode-task-v1",
+    "hostIndexSha256": "30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215",
+    "hostRpcModuleSha256": "e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31",
+    "requiredExports": [
+      "g",
+      "i",
+      "j"
+    ],
+    "referenceCommit": "7b3af187d7ee732e9043aed873a863fc855625c2"
+  },
+  "patchFormat": "header-preserving-append-v1",
+  "markerPath": "paseo-zcode-patcher.json",
+  "overlayHash": "b36053467b49dc2765680386f7754b2e8889e0df982baa2bf3dc1f3961b7c38a",
+  "entries": [
+    {
+      "path": "node_modules/@getpaseo/protocol/dist/provider-config.js",
+      "source": "node_modules/@getpaseo/protocol/dist/provider-config.js",
+      "sha256": "c234f02fa28ca2bef77d1c55a1f5204728ad3e64c7d0f528255ab937862a27eb",
+      "originalSha256": "77902d9b53fa4637c44f83a4571d1105df56da60c8731ec76262ea62d9abd6c1"
+    },
+    {
+      "path": "node_modules/@getpaseo/protocol/dist/provider-manifest.js",
+      "source": "node_modules/@getpaseo/protocol/dist/provider-manifest.js",
+      "sha256": "054b503f81967970fd9dd3a73b5885c0b73b7568f9de463c9fe3931af19d6452",
+      "originalSha256": "0af826339f7ab4a587ac893e47160f5a273d850e74586f8999c66c0561ee3921"
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/provider-registry.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/provider-registry.js",
+      "sha256": "86fe94c57a512d12727cda2b64a9049042f569ca66b446f5037d4a0ad362d137",
+      "originalSha256": "fe4ec3c04fe9903df87b4d218f207b842e1a808b8909df20bacbee8841b04714"
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/agent.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/agent.js",
+      "sha256": "691d574311d05d4ba033f14653c4a3cd886e2005a2187250ce5dcd39a3a3897c",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/discover.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/discover.js",
+      "sha256": "4ed0179511dc38c256a4140b79e18780ca9d0a8433de4dc7a0d96cd0213decbe",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/host-contract.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/host-contract.js",
+      "sha256": "5fa451a9ed36453ae4b0e22b9c20b650a6296c9b85175d518f6be69b6d45ae15",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/manifest.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/manifest.js",
+      "sha256": "70b436b7cf4722c7b726fdaabfe7b964d6838805d77208a9f23414d6553376b9",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/types.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/discovery/types.js",
+      "sha256": "01ae2a5b120382f9a648ced7ee8507493a134f216d100fc61600c6c9738235d2",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/errors.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/errors.js",
+      "sha256": "3f2af14de348b1d40fd5500e1859a1f703881b5305db110736d170eec9117127",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/host/bridge.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/host/bridge.js",
+      "sha256": "f6486c6f0c5dda2397c6171c03afd38a0e30ccda59dd12741ffc145b268268bc",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/host/contract.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/host/contract.js",
+      "sha256": "408b40ec3579ce6970bd3f0737195685580ba98a49452d1854e49a3f9825c328",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/host/runtime-source.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/host/runtime-source.js",
+      "sha256": "7af43cdfd6b28ecd65373324855edf24b7e82f15de7e864b969b70f940bd70cc",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/logger.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/logger.js",
+      "sha256": "1ac605731e654268f5e1e43faff04101131026a0bb9c8c7124857a752e4c1616",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/mapping.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/mapping.js",
+      "sha256": "4aba49459336d8897cb00934eaa4bc426fa72b3903bb484f86065ae02612c02c",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/client.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/client.js",
+      "sha256": "74c5ee1feb3b42cfec021acde2db4cf62007a7cb7ad74ac138037880c36a24ed",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/ndjson.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/ndjson.js",
+      "sha256": "8fdd18761b736875eadac9b631042f1f68c351e60883c6be75ad5183df9bb243",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/host-schemas.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/host-schemas.js",
+      "sha256": "c02f1c126db7faafbb519149132dc1ea07dc32d4e581fc51c5e0930b1ed1d894",
+      "originalSha256": null
+    },
+    {
+      "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/schemas.js",
+      "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/protocol/v1/schemas.js",
+      "sha256": "504fbb9ea9cd8b7c70f638175b49839877caa29fc5a45cbd804d944680f08f14",
+      "originalSha256": null
+    }
+  ]
+}

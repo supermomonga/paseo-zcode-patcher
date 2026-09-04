@@ -1,0 +1,37 @@
+{
+  "name": "paseo-zcode-patcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "paseo-zcode-patcher": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "artifacts",
+    "patches",
+    "LICENSES",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/src/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "format:check": "prettier --check \"src/**/*.ts\" \"scripts/**/*.ts\" \"test/**/*.ts\" vitest.config.ts package.json tsconfig.json",
+    "build:overlay": "tsx scripts/build-overlay.ts"
+  },
+  "dependencies": {
+    "@electron/asar": "4.3.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.3",
+    "prettier": "3.6.2",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.7"
+  }
+}

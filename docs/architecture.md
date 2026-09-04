@@ -190,7 +190,7 @@ Paseo側でplan IDを生成したり、別のplan updateと承認要求を相関
 - credentialまたはmodel provider未設定
 - workspace不一致
 - schema validation failure
-- child unexpected exit、request timeout、sequence gap
+- child unexpected exit、request timeout、sequence duplicate/regression
 - browser backend以外のunsupported reverse request
 
 次を行ってはならない。

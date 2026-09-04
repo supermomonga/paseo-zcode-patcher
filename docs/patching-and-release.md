@@ -32,7 +32,7 @@ paseo-zcode-patcher patch
 6. 一時bundleとASAR生成に必要な空き容量がある。
 7. `/Applications/Paseo.app`と`/Applications/ZCode.app`が処理中も同一であることを再検証できる。
 
-関連processはPID、executable、commandを示して拒否し、自動終了しない。全事前検証が成功するまで既存出力を削除しない。
+関連processはPIDを示して拒否し、自動終了しない。processのcommand lineは長大な埋め込みsourceや利用者の引数を含み得るため表示しない。全事前検証が成功するまで既存出力を削除しない。
 
 ## 3. アプリ生成
 
@@ -67,7 +67,7 @@ marker pathは`paseo-zcode-patcher.json`とし、次を含める。
   "paseoVersion": "0.7.2",
   "paseoSourceCommit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
   "originalAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-  "overlaySha256": "<generated manifest value>",
+  "overlaySha256": "b36053467b49dc2765680386f7754b2e8889e0df982baa2bf3dc1f3961b7c38a",
   "zcodeArtifact": "zcode-host-3.11.2",
   "zcodeProtocol": "zcode-task-v1",
   "zcodeAcpReferenceCommit": "7b3af187d7ee732e9043aed873a863fc855625c2",
@@ -75,7 +75,7 @@ marker pathは`paseo-zcode-patcher.json`とし、次を含める。
 }
 ```
 
-山括弧の値は実装成果物から生成する値であり、release manifest作成時に具体値へ置換する。
+markerはtimestampやmachine固有pathを含まず、上記の固定値から決定的に生成する。
 
 ## 5. Paseo source overlay
 
