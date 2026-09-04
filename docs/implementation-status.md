@@ -26,8 +26,8 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | --- | --- |
 | package | `paseo-zcode-patcher@0.1.0`、`private: true` |
 | overlay entry 数 | 18 |
-| overlay SHA-256 | `26b27cf48778d6ea41f03dfc4ff99d6caf76fa64d2ae1335111b496c8494dedf` |
-| 生成後 `app.asar` SHA-256 | `0fa10f90161111128e83da0420851ef3c78b548ec8d2ade26fe49e891219bd32` |
+| overlay SHA-256 | `af28209c4bbb26c4bab2901feb2cb52d28e82dc3327f2b22d204005f5fdce5d4` |
+| 生成後 `app.asar` SHA-256 | `6c3531db45cb75e9c2efd9748527c8cdb462ab13c10c8e5455e430ac369242c8` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -51,7 +51,7 @@ overlay は固定 Paseo source archive から独立に再生成して同じ hash
 その後、次を実機で確認した。
 
 - `node dist/src/cli.js patch` が固定出力 `/Applications/PaseoZCode.app` を生成した。
-- 出力 ASAR は manifest の SHA-256 `0fa10f90161111128e83da0420851ef3c78b548ec8d2ade26fe49e891219bd32` と一致した。
+- 出力 ASAR は当時のmanifest SHA-256 `0fa10f90161111128e83da0420851ef3c78b548ec8d2ade26fe49e891219bd32` と一致した。
 - 元 Paseo ASAR は SHA-256 `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` のままである。
 - `codesign --verify --deep --strict --verbose=2` が成功した。
 - 異なる `PASEO_HOME` と Electron user-data directory を使う cold start を 3 回行い、各回で画面と daemon の起動、終了時の lifecycle RPC による正常停止を確認した。
@@ -75,6 +75,15 @@ Paseoはcomposerから送信した発言を`clientMessageId`付きで先にtimel
 `run`と`startTurn`からturn coordinatorへ`clientMessageId`を引き継ぎ、送信時のuser message通知へ同じIDを付与するよう修正した。これによりPaseoの既存照合処理がprovider通知を重複として正しく抑止し、providerが独自に生成した別のuser messageは従来どおり保持する。
 
 修正版アプリで新規sessionを作成し、一意なpromptを送信した。user messageの吹き出しが1件だけ表示され、ZCodeの応答が正常に完了することを実画面で確認した。
+
+### 子ツール実行後の履歴同期修正の検証
+
+入力を省略した子ツール通知の扱いは[Provider contract](provider-contract.md#6-event-mapping)に定義する。通常ツールの入力と親の最終回答を保持し、子ツールの成功・失敗の両方を含む履歴応答がJSON変換後のWebSocket validatorに適合する回帰testを追加した。修正前は同testで失敗し、修正後は成功した。
+
+作業中のicon対応を含むoverlay buildは関連100 testとprotocol/serverの型検査に成功した。生成したoverlayへ実機採取済みの通知35件を再投入し、初期snapshotを除く各通知後の履歴応答34回がすべてvalidatorを通り、親の最終回答と正常終了が保持されることを確認した。今回の修正だけを取り出したpatcherは18 test成功、runtime opt-in testは通常実行で1件skip。今回変更したファイルに対するupstream lintは修正前後とも同じ既存10 errorで、新規errorはない。
+
+ユーザーの許可により起動中の旧`zcode-acp`を終了し、修正版アプリを生成・署名した。実機検証は別途作業中のicon対応を含むアプリで行い、その成果物とのhash一致と元Paseo ASAR不変を確認した。元の会話を修正版アプリで開き、Exploreの結果を含む最終回答が表示され、履歴同期エラーが出ないことを確認した。元の会話へのプロンプト再送は行っていない。
+
 
 ## 配布上の制約
 

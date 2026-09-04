@@ -6,7 +6,7 @@
     "platform": "darwin",
     "arch": "arm64",
     "sourceAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-    "patchedAsarSha256": "0fa10f90161111128e83da0420851ef3c78b548ec8d2ade26fe49e891219bd32"
+    "patchedAsarSha256": "6c3531db45cb75e9c2efd9748527c8cdb462ab13c10c8e5455e430ac369242c8"
   },
   "zcode": {
     "appVersion": "3.11.2",
@@ -25,7 +25,7 @@
   },
   "patchFormat": "header-preserving-append-v1",
   "markerPath": "paseo-zcode-patcher.json",
-  "overlayHash": "26b27cf48778d6ea41f03dfc4ff99d6caf76fa64d2ae1335111b496c8494dedf",
+  "overlayHash": "af28209c4bbb26c4bab2901feb2cb52d28e82dc3327f2b22d204005f5fdce5d4",
   "entries": [
     {
       "path": "node_modules/@getpaseo/protocol/dist/provider-config.js",
@@ -48,7 +48,7 @@
     {
       "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/agent.js",
       "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/agent.js",
-      "sha256": "e510f326ce02d29f9842705fe5b1662ed0119f216ba68db7736f24b17220fc3a",
+      "sha256": "c11a96f6f572e0039e7b4415f816ab32271a3f8a26a0e80dc1ed485048013cc7",
       "originalSha256": null
     },
     {

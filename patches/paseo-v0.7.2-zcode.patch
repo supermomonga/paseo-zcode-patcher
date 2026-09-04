@@ -99,15 +99,18 @@ index c65db34b2d7327581055b38fa8b8166f7fdc6a14..859fa81e56733160862b57d273fcbe3d
  };
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.test.ts b/packages/server/src/server/agent/providers/zcode/agent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4e7b1ad420e84501cfcbb42f02a71e2e5af6ea92
+index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167acbb355ae9
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.test.ts
-@@ -0,0 +1,616 @@
+@@ -0,0 +1,743 @@
 +import { mkdtemp, rm } from "node:fs/promises";
 +import { tmpdir } from "node:os";
 +import { join } from "node:path";
 +import type { z } from "zod";
 +import { afterEach, describe, expect, it, vi } from "vitest";
++
++import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
++import type { AgentStreamEvent } from "../../agent-sdk-types.js";
 +
 +import { ZCodeAgentSession } from "./agent.js";
 +import type { HostBridge, HostSubscription } from "./host/bridge.js";
@@ -409,6 +412,130 @@ index 0000000000000000000000000000000000000000..4e7b1ad420e84501cfcbb42f02a71e2e
 +      ])
 +    );
 +  });
++
++  it.each(["result", "error"] as const)(
++    "keeps subagent tools without input valid through %s and history synchronization",
++    async (terminalKind) => {
++      const { bridge, session } = await fixture();
++      const events: AgentStreamEvent[] = [];
++      session.subscribe((event) => events.push(event));
++      await session.startTurn("Use Explore to read marker.txt");
++      let seq = 0;
++      const emit = async (type: string, payload: Record<string, unknown>) => {
++        seq += 1;
++        await bridge.emit({
++          type: "session.event",
++          event: {
++            eventId: `event-${seq}`,
++            sessionId: "session-1",
++            turnId: "native-turn",
++            seq,
++            timestamp: seq,
++            deliveryKind: "desktop-continuous",
++            type,
++            payload,
++          },
++        });
++      };
++      const assertHistory = async () => {
++        const entries = [];
++        for await (const event of session.streamHistory()) {
++          if (event.type !== "timeline") continue;
++          const index = entries.length + 1;
++          entries.push({
++            provider: "zcode",
++            item: event.item,
++            timestamp: "2026-09-05T00:00:00.000Z",
++            seqStart: index,
++            seqEnd: index,
++            sourceSeqRanges: [{ startSeq: index, endSeq: index }],
++            collapsed: [],
++          });
++        }
++        const response = {
++          type: "session",
++          message: {
++            type: "fetch_agent_timeline_response",
++            payload: {
++              requestId: "history",
++              agentId: "agent",
++              agent: null,
++              direction: "tail",
++              projection: "projected",
++              epoch: "epoch",
++              reset: false,
++              staleCursor: false,
++              gap: false,
++              window: { minSeq: 1, maxSeq: entries.length, nextSeq: entries.length + 1 },
++              startCursor: { epoch: "epoch", seq: 1 },
++              endCursor: { epoch: "epoch", seq: entries.length },
++              hasOlder: false,
++              hasNewer: false,
++              entries,
++              error: null,
++            },
++          },
++        };
++        expect(validateWSOutboundMessage(JSON.parse(JSON.stringify(response))).success).toBe(true);
++      };
++      const parentInput = {
++        description: "Read marker",
++        prompt: "Read marker.txt",
++        subagent_type: "Explore",
++      };
++      await emit("tool.updated", {
++        kind: "started",
++        toolCallId: "parent",
++        toolName: "Agent",
++        input: parentInput,
++      });
++      // ZCode 3.11.2 forwards child started/result notifications without input or tool_call streaming.
++      const child = {
++        toolCallId: "tool_subagent_child_read",
++        toolName: "Read",
++        source: "subagent",
++        parentToolCallId: "parent",
++        agentId: "child",
++        agentType: "Explore",
++        childSessionId: "child-session",
++        childToolCallId: "read",
++        description: "Read marker",
++      };
++      await emit("tool.updated", { ...child, kind: "started", startedAt: 2 });
++      await assertHistory();
++      const output = { success: terminalKind === "result", content: "Read outcome" };
++      await emit("tool.updated", { ...child, kind: terminalKind, [terminalKind]: output });
++      await assertHistory();
++      await emit("tool.updated", {
++        kind: "result",
++        toolCallId: "parent",
++        toolName: "Agent",
++        result: "Explore finished",
++      });
++      await emit("model.streaming", {
++        kind: "text_delta",
++        delta: "Verification finished",
++        assistantMessageId: "answer",
++      });
++      await emit("turn.completed", { resultType: "success" });
++      await assertHistory();
++      const tools = events.flatMap((event) =>
++        event.type === "timeline" && event.item.type === "tool_call" ? [event.item] : [],
++      );
++      expect(tools.map((item) => item.detail)).toEqual([
++        { type: "unknown", input: parentInput, output: null },
++        { type: "unknown", input: null, output: null },
++        { type: "unknown", input: null, output },
++        { type: "unknown", input: parentInput, output: "Explore finished" },
++      ]);
++      expect(tools[2]).toMatchObject({
++        status: terminalKind === "result" ? "completed" : "failed",
++        error: terminalKind === "result" ? null : output,
++      });
++      expect(events.at(-1)).toMatchObject({ type: "turn_completed" });
++      await session.close();
++    },
++  );
 +
 +  it("rejects a second prompt instead of queueing it", async () => {
 +    const { bridge, session } = await fixture();
@@ -721,10 +848,10 @@ index 0000000000000000000000000000000000000000..4e7b1ad420e84501cfcbb42f02a71e2e
 +});
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.ts b/packages/server/src/server/agent/providers/zcode/agent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..30461e3333754854b2c861bfbccb133d4f695a06
+index 0000000000000000000000000000000000000000..68b031b7c628472d682849d943f06caa88e6cd2f
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.ts
-@@ -0,0 +1,1751 @@
+@@ -0,0 +1,1756 @@
 +import { randomUUID } from "node:crypto";
 +import { homedir } from "node:os";
 +import { isAbsolute } from "node:path";
@@ -1889,7 +2016,12 @@ index 0000000000000000000000000000000000000000..30461e3333754854b2c861bfbccb133d
 +    }
 +    const tool = active.tools.get(callId) ?? {
 +      name: typeof payload.toolName === "string" ? payload.toolName : "tool",
-+      input: payload.input,
++      // ZCode child tool notifications omit input. Paseo represents unavailable
++      // input as null; undefined would invalidate the entire history response.
++      input:
++        payload.source === "subagent" && payload.input === undefined
++          ? null
++          : payload.input,
 +      output: null,
 +      status: "running" as const,
 +    };

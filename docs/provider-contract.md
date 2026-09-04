@@ -124,6 +124,8 @@ ZCode 3.11.2はworkspace stateでは`thoughtLevel.current`を返さず、`defaul
 
 tool detailは既存Paseo tool normalizerで安全に表現できる種類だけを具体型へ変換し、それ以外は`unknown` detailにraw input/outputを保持する。tool名だけから危険性や権限を推測しない。
 
+ZCode 3.11.2の`source: "subagent"`を持つ子ツール通知は、入力のstream通知を伴わず、開始・完了通知にも`input`を含めない。この場合の入力不明はPaseoの既存`unknown` detailの`input: null`で表す。入力が提供される場合はその値を保持する。`undefined`のまま送ると必須fieldがJSONから消え、子ツールを含む履歴応答全体が拒否されるため、子ツールの開始・終了から履歴取得まで通信schemaに適合することを検証する。
+
 ## 7. Tool permission
 
 native `permission.request.options`から各actionを次のように作る。

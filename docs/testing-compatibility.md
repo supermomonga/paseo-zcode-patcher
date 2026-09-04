@@ -66,6 +66,7 @@
 
 - text/reasoning chunkの連結とmessage ID
 - tool scheduled/start/progress/result/error transition
+- 入力を省略した子ツールの開始・成功・失敗を含む履歴が、JSON変換後も実際のWebSocket validatorを通ること。親の入力と最終回答も保持する。
 - usage、title、terminal reason
 - unknown event/result/transitionのfail-closed
 
