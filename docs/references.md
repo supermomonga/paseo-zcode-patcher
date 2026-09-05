@@ -16,7 +16,7 @@ Repository: `paseo-acp-patcher`
 - `src/process-check.ts`
 - `src/commands/patch.ts`
 - `scripts/build-overlay.ts`
-- `artifacts/paseo-0.7.2-arm64/manifest.json`
+- `manifests/paseo-0.7.2-arm64.json`（Git管理の検証値。生成後は同内容をlocal artifactsへ配置）
 - ADR 0003、0007、0008、0009、0010
 
 採用する内容はversion固定overlay、header-preserving ASAR更新、破棄可能なアプリコピー、元entitlements保持のad-hoc署名、external state非変更である。ACP V1 client、SDK、elicitation変換は採用しない。

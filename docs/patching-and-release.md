@@ -1,13 +1,13 @@
 # パッチ・ビルド・配布仕様
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 ## 1. 公開CLI
 
-初版の公開コマンドは一つだけである。
+Gitでソースコードのみを配布する。利用者はcheckoutで`npm ci --ignore-scripts`と`npm run build`を実行し、ローカルに生成・検証したoverlayを使って次のコマンドを実行する。
 
 ```console
-paseo-zcode-patcher patch
+node dist/src/cli.js patch
 ```
 
 入力と出力は固定する。
@@ -90,13 +90,13 @@ markerはtimestampやmachine固有pathを含まず、上記の固定値から決
 
 renderer変更はZCode icon IDの対応付け、新規draftのPlan直前のmode受け渡し、既存コンテキストメーターへのセッション単位のクオータ取得の接続に限定する。既存providerと既存ACP clientの実装は変更しない。共通clientの使用量取得には任意のagentIdを追加する。新しい画像assetやZCode専用componentは追加しない。
 
-`scripts/build-overlay.ts`は指定Paseo checkoutが固定commitでcleanであることを確認し、`git archive`で一時directoryへ展開する。そこでsource patch適用、frozen install、公式postinstallによる依存パッチ適用、protocol/server/provider/icon/form focused testとアプリ専用設定でのdraft保存test、typecheck、server build、Electron向けrenderer exportを行い、overlayとmanifestを生成する。renderer exportはmain bundleと参照用`index.html`以外が元アプリと同一であることを検証し、main bundleだけを元と同じ固定pathへ置換するresource entryとして保存する。指定checkoutのworking treeは変更しない。
+`scripts/build-overlay.ts`はGitHubの公式Paseo repositoryから固定commitのsource archiveを取得し、`src/constants.ts`のSHA-256と一致してから一時directoryへ展開する。そこでsource patch適用、frozen install、公式postinstallによる依存パッチ適用、protocol/server/provider/icon/form focused testとアプリ専用設定でのdraft保存test、typecheck、server build、Electron向けrenderer exportを行い、overlayとmanifestを生成する。renderer exportはmain bundleと参照用`index.html`以外が元アプリと同一であることを検証し、main bundleだけを元と同じ固定pathへ置換するresource entryとして保存する。生成manifest全体をGit管理の`manifests/paseo-0.7.2-arm64.json`と比較し、一致した生成物だけを`artifacts/`へ配置する。取得したsourceと依存関係は成功・失敗時とも一時directoryから削除する。既存のlocal checkout指定、最新版取得、生成済みoverlayのdownload、hash不一致の自動許容は提供しない。
 
 ZCode接続実装は`zcode-acp`参照commitの意味論をNode.jsへ移植する。Bun API、ACP server、ACP型、ACP fallbackをoverlayへ含めない。
 
 ## 6. Manifest
 
-`artifacts/paseo-0.7.2-arm64/manifest.json`は次の正本とする。
+Git管理の`manifests/paseo-0.7.2-arm64.json`を次の検証値の正本とする。ローカル生成後の`artifacts/paseo-0.7.2-arm64/manifest.json`はこの内容と一致し、patcherが実際のfile hashを再検証する。
 
 - Paseo version、source commit、platform、architecture
 - 元・生成ASAR SHA-256
@@ -127,8 +127,12 @@ patcherは次を行わない。
 
 利用可能性はpatched providerがruntimeで再検証する。patch時に成功しても、その後ZCodeが更新されてcontract不一致になればproviderをunavailableにする。
 
-## 9. Release artifact
+## 9. ソース配布とローカル生成
 
-初版releaseはnpm package/CLI sourceとversion固定overlay/manifestを含む。overlayには固定Paseo sourceから生成したmain renderer bundle 1 fileを含むが、PaseoまたはZCodeの完全なアプリ本体は含めない。release前にlockfile、checksums、dependency license一覧を検証する。生成済み`PaseoZCode.app`自体は配布しない。
+Gitではソースコード、ソースパッチ、固定commitと取得archiveのSHA-256、検証用manifest、テスト、文書、license/noticeを管理する。生成済みCLI、overlay、アプリ本体、npm packageは配布しない。`private: true`はnpmへの誤公開を防ぐため保持する。
 
-通常の`node_modules/`はrepositoryで追跡しないが、`artifacts/*/overlay/node_modules/`はASARへ適用するversion固定成果物なので例外として追跡する。クリーンなcheckoutから`npm pack --dry-run`を実行し、manifestが参照するASAR 26 entryとrenderer resource 1 entryがpackageへ含まれることを確認する。
+`artifacts/`と`dist/`はローカル生成物としてGit管理から除外する。既存のGit履歴は書き換えないため、過去commitに含まれる生成物は残る。
+
+`npm run build`は`build:cli`、source取得・検証とoverlay生成、`test:artifact`を順に実行する。`npm test`は生成物不要のunit testを実行し、`npm run test:artifact`は生成物が存在しない場合も失敗する。元アプリと生成物のhash検証に成功してから、利用者がpatchコマンドを実行する。
+
+対応versionやsource patchを変更するときは、取得元とarchive hash、検証用manifest、期待hash、テスト、文書を合わせて更新する。入力やbuild環境が変わって生成物のhashが一致しなければ原因を調査し、検証を省略して進めない。

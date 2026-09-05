@@ -61,7 +61,9 @@ function artifactDirectory(): string {
     if (parent === directory) break;
     directory = parent;
   }
-  throw new Error(`could not locate artifacts/${ARTIFACT_ID}`);
+  throw new Error(
+    `could not locate artifacts/${ARTIFACT_ID}; run 'npm run build' first`,
+  );
 }
 
 function assertFixedPaths(): void {

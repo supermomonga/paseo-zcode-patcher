@@ -1,6 +1,6 @@
 # 製品仕様
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 状態: 実装・ローカルアプリ検証完了
 
@@ -43,8 +43,8 @@
 
 ### 3.1 パッチ生成
 
-1. 利用者がPaseoとZCodeを終了する。
-2. `paseo-zcode-patcher patch`を実行する。
+1. 利用者がGitからソースを取得し、`npm ci --ignore-scripts`と`npm run build`を実行する。buildは公式Paseoの固定ソースを取得・hash検証してから、ローカルにoverlayを生成・検証する。生成物は配布しない。
+2. PaseoとZCodeを終了し、`node dist/src/cli.js patch`を実行する。
 3. patcherがPaseoとZCodeの実体、version、hash、必要なexport、runtime smokeを検証する。
 4. `/Applications/Paseo.app`を変更せず、一時コピーへoverlayを適用する。
 5. 一時コピーを検証・ad-hoc署名し、`/Applications/PaseoZCode.app`として配置する。

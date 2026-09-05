@@ -1,6 +1,7 @@
 paseo-zcode-patcher 0.1.0
 
-This repository contains an overlay derived from Paseo 0.7.2 source code.
+This repository distributes source patches derived from Paseo 0.7.2 source
+code. Generated overlays are built locally by each user and are not distributed.
 Paseo copyright (c) 2025-present Mohamed Boudra and is licensed under the
 Apache License, Version 2.0. A copy is provided at
 LICENSES/Paseo-Apache-2.0.txt.
@@ -14,9 +15,9 @@ repositories at fixed commits:
   7b3af187d7ee732e9043aed873a863fc855625c2
 
 Neither reference repository declares a distribution license in the inspected
-commit. This package therefore remains private; do not publish it without
-confirming that the distributor has the required rights and adding the
-applicable license notices.
+commit. Source distribution requires the distributor to hold the required
+rights and retain the applicable license notices. This project is distributed only as
+source through Git; private: true prevents accidental npm publication.
 
 Production npm dependencies and declared licenses:
 

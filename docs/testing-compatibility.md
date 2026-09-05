@@ -1,12 +1,14 @@
 # Testing and compatibility
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 ## 1. 互換性方針
 
 初版はPaseo 0.7.2/macOS arm64とZCode 3.11.2の一組だけをサポートする。PaseoまたはZCodeの新版へ対応するときは、manifest、overlay、fixture、test、実機証拠、文書を同じ変更で置き換える。過去versionの分岐を追加しない。
 
 ## 2. Patcher unit tests
+
+`npm test`は生成物のないcheckoutでも実行できる。source取得はfixtureで検証し、HTTP error・network error・hash不一致・展開失敗を拒否する。`npm run test:artifact`は別途ローカル生成物を必須として検証し、未生成なら失敗する。
 
 - platform、architecture、Node versionの拒否条件
 - manifest/overlay/entry hashの検証
@@ -96,7 +98,7 @@
 
 ## 4. Overlay build checks
 
-固定Paseo source commitの一時archive上で次を実行する。
+`npm run build`または`npm run build:overlay`で公式Paseoの固定commit archiveを取得し、固定SHA-256の照合後に一時directoryへ展開して次を実行する。
 
 1. source patchをwhitespace errorなしで適用
 2. frozen dependency install
@@ -106,7 +108,9 @@
 6. Electron向けrenderer exportとmain bundle以外の同一性検証
 7. overlay entry import smoke
 8. manifest/marker/hash生成
-9. 同じ入力で二回生成し、byte-for-byte一致を確認
+9. 同じoverlayからASARを二回生成し、byte-for-byte一致を確認
+10. 生成manifest全体を`manifests/paseo-0.7.2-arm64.json`と比較し、全entryのhashと生成ASAR hashが一致することを確認
+11. `test:artifact`でlocal生成物を検証
 
 ## 5. 実機検証
 

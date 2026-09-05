@@ -12,6 +12,8 @@ Creates a local macOS arm64 app copy of Paseo 0.7.2 with a built-in provider for
 
 - macOS arm64 (Other OS support is under development)
 - Node.js 22.12.0 or later
+- Git, tar, and Xcode Command Line Tools (for native build dependencies)
+- Internet access to GitHub and the npm registry during the build
 - Official Paseo 0.7.2 at `/Applications/Paseo.app` (the supported ASAR is strictly verified by its SHA-256 hash)
 - Official ZCode 3.11.2 / CLI 0.16.5 at `/Applications/ZCode.app`
 
@@ -19,13 +21,17 @@ Other versions, alternative installation paths, and modified ZCode hosts are rej
 
 ## Usage
 
-Quit Paseo, ZCode, and any processes that use the ZCode host before running:
+Clone this repository and run the following commands from its directory. Quit Paseo, ZCode, and any processes that use the ZCode host before applying the patch:
 
 ```console
 npm ci --ignore-scripts
 npm run build
 node dist/src/cli.js patch
 ```
+
+`npm run build` compiles the patcher, downloads the pinned official Paseo source archive, verifies its SHA-256 before extraction, and builds the patched server and renderer locally. It runs the relevant tests and checks the generated files against `manifests/paseo-0.7.2-arm64.json`. This requires the supported official Paseo application to be installed and can take several minutes with substantial temporary disk usage. The downloaded source and its dependencies are removed when the build finishes or fails; generated files remain in the ignored `artifacts/` directory.
+
+The patch command uses these local artifacts. Re-run `npm run build` after updating this repository. Download, build, or hash verification failures stop the build; no prebuilt artifacts or alternate versions are fetched.
 
 On success, the patcher creates `/Applications/PaseoZCode.app`. The original `/Applications/Paseo.app` and `/Applications/ZCode.app` remain unchanged. If an output app already exists, it is replaced only after all preflight checks pass.
 
@@ -40,16 +46,18 @@ In ZCode sessions, the circular icon to the left of the microphone shows context
 ```console
 npm test
 npm run typecheck
-npm run build
+npm run build:cli
 npm run format:check
 npm audit
 ```
 
-To regenerate the overlay from a clean checkout of the pinned Paseo source commit:
+Unit tests do not require generated artifacts or the official applications (the real ZCode runtime test remains opt-in). To download the pinned source and regenerate and verify the local overlay:
 
 ```console
-npm run build:overlay -- --paseo-source /path/to/paseo-at-9400a49af670fdb5db4af58e73f8df98588dbea9
+npm run build:overlay
 ```
+
+`npm run test:artifact` verifies an already generated overlay and fails if it is absent. To maintain a source change, update the reviewed manifest and expected hashes together; the build never accepts new hashes automatically.
 
 See [docs/README.md](docs/README.md) for detailed specifications, security boundaries, and checks to run on a physical machine.
 
@@ -59,4 +67,6 @@ The provider uses the official host service from the installed ZCode app. ZCode 
 
 ## Distribution
 
-The Paseo and ZCode applications are not bundled. This package remains `private` because the distribution licenses of the referenced private projects have not been explicitly specified. Before public distribution, review the conditions in [NOTICE](NOTICE) and [docs/security-and-licensing.md](docs/security-and-licensing.md).
+This project is distributed as source code through Git. It does not distribute compiled patchers, generated overlays, npm packages, or patched applications. Each user builds the overlay and applies the patch on their own PC. Only source code, source patches, build instructions, verification metadata, and license notices are tracked; `artifacts/` and `dist/` are local outputs.
+
+Paseo is licensed under Apache-2.0, with separate licenses for its third-party components. Source distribution still requires the applicable license and attribution notices. See [NOTICE](NOTICE) and [docs/security-and-licensing.md](docs/security-and-licensing.md) for the reference repositories and licensing boundaries. `private: true` prevents accidental npm publication.

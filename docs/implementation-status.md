@@ -1,6 +1,6 @@
 # Implementation status
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 ## 現在の状態
 
@@ -8,7 +8,7 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 
 | Area | Status | 証拠 |
 | --- | --- | --- |
-| Architecture/ADR | complete | ADR 0002–0014 は Accepted、`adrs doctor` は error 0 |
+| Architecture/ADR | complete | ADR 0002–0015 は Accepted、`adrs doctor` は error 0 |
 | Patcher CLI | complete | `patch` 以外を拒否し、固定 path、preflight、process 検出、cleanup をテスト |
 | ASAR patcher | complete | header 保持、entry hash、marker、整合性情報、決定性を fixture で検証 |
 | Paseo source patch | complete | 固定 commit に whitespace error なしで適用し、protocol/server の型検査、build、provider icon focused test に成功 |
@@ -19,6 +19,18 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | Provider runtime evidence | verified | 今回の実機hostでコンテキスト現在値・再開後の値・個人契約クオータの一致を確認 |
 | macOS app/signing | verified | 今回の`/Applications/PaseoZCode.app`でmanifest hash一致、元Paseo ASAR不変、strict署名を確認。3回の独立cold startは過去の検証 |
 | UI integration | verified | 今回の実画面で円アイコン・コンテキスト・契約名・クオータを確認し、ZCode公式の個人契約表示と照合 |
+
+## ソース配布とローカル生成（2026-09-06）
+
+Gitでソースコードのみを配布し、利用者のPCで固定Paseoソースを取得・検証してoverlayを生成する方式へ変更した。`npm run build`はCLIのコンパイル、公式archiveの取得とSHA-256照合、既存のsource patch適用・テスト・型検査・server/renderer build、生成manifestの照合、artifact testを順に実行する。生成manifest全体はGit管理の`manifests/paseo-0.7.2-arm64.json`と一致する必要がある。
+
+新しい手順で実downloadから全buildまで成功した。Paseo側487 test（361件とapp 126件）、local artifact test 3件が成功し、全26 ASAR entryと1 renderer resource、overlay全体、生成後ASARのhashは下記の既存検証値と一致した。build後に取得sourceと依存関係の一時directoryが削除されることも確認した。
+
+`artifacts/`、`dist/`、`node_modules/`のないソース一式でも`npm ci --ignore-scripts`、`npm test`、`npm run build:cli`が成功した。unit testは22件成功・実機opt-in 1件skip。新規5 testは正常なdownload・展開、hash不一致での未展開、HTTP error、network error、展開失敗を扱う。生成物のない`test:artifact`は3件とも失敗し、patchコマンドもアプリを検査する前にbuildを案内して終了した。
+
+Gitのartifacts追跡は0件で、過去の履歴は書き換えていない。型検査・整形・diff検査は成功。ADR 0015はAcceptedとしてADR 0008を部分改訂し、目次を再生成した。`adrs doctor`は0 error、ADR 0001の既存warning/infoのみ。
+
+今回の変更では既存アプリへのパッチ適用やUI再検証は行っていない。生成物が既存の検証値と一致することを確認しており、以下の実機・実画面の記録は各節に記載した以前の検証結果である。
 
 ## 固定された成果物
 

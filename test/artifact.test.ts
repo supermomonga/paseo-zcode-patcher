@@ -12,7 +12,7 @@ const artifactDirectory = path.join(
   "paseo-0.7.2-arm64",
 );
 
-describe("release artifact", () => {
+describe("locally generated artifact", () => {
   it("verifies every overlay entry and the fixed ZCode contract", async () => {
     const manifest = await loadManifest(artifactDirectory);
     expect(manifest.paseo).toMatchObject({

@@ -17,7 +17,7 @@ flowchart LR
     H --> W["Workspace / model providers / tools"]
 ```
 
-`paseo-zcode-patcher`はbuild時にPaseo sourceへZCode provider実装と既存GLM Agent iconへの対応付けを追加し、生成したserver/protocolのASAR entryとmain renderer bundleだけをoverlayとして保持する。実行時にはPaseo daemon内のproviderがZCode同梱Electronをchild processとして起動する。外部`zcode-acp` processやACP wire protocolは存在しない。
+`paseo-zcode-patcher`はbuild時にPaseo sourceへZCode provider実装と既存GLM Agent iconへの対応付けを追加し、生成したserver/protocolのASAR entryとmain renderer bundleだけをローカルのoverlayとして保持する。Gitで配布するのはソースと検証用manifestであり、build時に公式の固定ソースを取得・検証する。生成済みoverlayやCLIは配布しない。実行時にはPaseo daemon内のproviderがZCode同梱Electronをchild processとして起動する。外部`zcode-acp` processやACP wire protocolは存在しない。
 
 ## 2. Componentと責務
 

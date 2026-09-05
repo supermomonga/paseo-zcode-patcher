@@ -1,12 +1,14 @@
 # paseo-zcode-patcher 設計文書
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 状態: **実装・ローカルアプリ検証完了**
 
 `paseo-zcode-patcher` は、公式 Paseo Desktop にZCode専用の組み込みプロバイダーを追加した、破棄可能なアプリコピーを生成するパッチャーである。ZCodeとの通信にACPを使わず、インストール済みZCodeの公式host serviceをPaseo serverから直接利用する。
 
 ## 固定した方針
+
+- Gitでソースコードのみを配布する。利用者が`npm run build`で公式の固定Paseoソースを取得・検証し、overlayをローカル生成する。生成済みCLI・overlay・アプリは配布しない。
 
 - パッチ生成、安全検証、ASAR overlay、アプリコピー、署名は`paseo-acp-patcher`の方式を踏襲する。
 - ZCodeの探索、互換性判定、host起動、session管理、event変換は`zcode-acp`の検証済み実装をNode.js向けに移植する。
@@ -40,6 +42,6 @@
 | `paseo-acp-patcher`参照commit | `6c5c824e6eaa581f90cb1e809e1a59d61d2740f4` |
 | `zcode-acp`参照commit | `7b3af187d7ee732e9043aed873a863fc855625c2` |
 
-生成済み overlay は ASAR 19 entryとrenderer resource 1 entryで、overlay SHA-256 は `f12dff31dff52579919cc84e92779613e4b17eed12e68cada8705fb3c1697b31`、生成後 ASAR SHA-256 は `dc5b4045d65aef875d0e3fec07a7fd4ca118bb64b6e096c9c83cc8df108f77a5` である。entry ごとの hash は `artifacts/paseo-0.7.2-arm64/manifest.json` を正とする。
+ローカルに生成するoverlayはASAR 26 entryとrenderer resource 1 entryである。検証値の正本はGit管理の`manifests/paseo-0.7.2-arm64.json`で、生成manifest全体を照合する。生成物は`artifacts/`に保存し、Gitでは追跡しない。
 
 provider と `/Applications/PaseoZCode.app` の実機検証は完了している。生成 hash、strict 署名、3 回の独立 cold start、ZCode の利用可能表示、PlanCard、model pickerとcomposerのZCode iconの画面確認結果は [Implementation status](implementation-status.md) に記録する。

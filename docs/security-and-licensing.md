@@ -1,6 +1,6 @@
 # Security and licensing
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 ## 1. Trust boundary
 
@@ -90,14 +90,15 @@ ZCode runtimeがmodel/providerへ送るprompt、workspace情報、telemetryはZC
 
 ## 9. Licensing and distribution
 
-- PaseoとZCodeのbinary、ASAR、host moduleをrepository/npm/releaseへ含めない。
+- Gitでソースコードのみを配布し、生成済みCLI、overlay、npm package、アプリ本体は配布しない。PaseoとZCodeのbinary、ASAR、host moduleを含めない。
+- 利用者のPCで公式Paseoの固定source archiveを取得し、SHA-256を照合してから展開・buildする。生成manifestはGit管理の検証値と照合する。
 - 利用者が公式配布物を別途installし、patcherはlocal copyの生成とlocal runtime起動だけを行う。
 - `zcode-acp`からcodeを利用する場合は、そのlicense/notice条件を実装時の参照commitで確認し、必要なnoticeを保持する。
 - `paseo-acp-patcher`からcodeを利用する場合も同様にlicense/noticeを確認する。
 - ZCode/Paseoのlogoやtrademark assetを独自packageへ同梱しない。
-- dependency lock、license一覧、checksumをrelease時に生成・確認する。
+- dependency lock、license一覧、checksumはソース更新時に確認する。PaseoのApache-2.0と第三者コードの個別license、およびソースパッチの著作権表示・変更表示は保持する。
 
-この文書は法的助言ではない。公開配布前にPaseo、ZCode、参照repository、依存packageの当該versionのlicenseと利用条件を再確認する。
+この文書は法的助言ではない。ソース配布にもlicense条件は適用される。参照repositoryの配布権限は、生成物を配布しないことや`private: true`だけでは確定しない。
 
 ## 10. Security acceptance checklist
 
@@ -109,5 +110,5 @@ ZCode runtimeがmodel/providerへ送るprompt、workspace情報、telemetryはZC
 - [x] child process cleanup testと実機終了後のprocess確認
 - [x] unsupported Paseo/ZCode fail-closed test
 - [x] 元アプリ不変とpatched appのstrict署名検証
-- [x] release artifactへPaseo/ZCodeアプリ本体が含まれないことを確認
-- [x] dependency license/notice確認。配布license不明の参照repositoryがあるためpackageはprivate
+- [x] Gitの配布対象に生成済みoverlay・CLI・Paseo/ZCodeアプリ本体を含めない
+- [ ] 参照repositoryのソース配布権限と必要なnoticeの確認。npmへの誤公開防止のためpackageはprivate

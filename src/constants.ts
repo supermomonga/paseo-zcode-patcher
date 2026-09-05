@@ -1,6 +1,10 @@
 export const PATCHER_VERSION = "0.1.0";
 export const TARGET_PASEO_VERSION = "0.7.2";
 export const TARGET_PASEO_COMMIT = "9400a49af670fdb5db4af58e73f8df98588dbea9";
+export const PASEO_SOURCE_ARCHIVE = {
+  url: `https://api.github.com/repos/getpaseo/paseo/tarball/${TARGET_PASEO_COMMIT}`,
+  sha256: "16832eb22140fb7c80a006134a424514668bd9fe29f6aba863df05129fc42495",
+} as const;
 export const SOURCE_APP_PATH = "/Applications/Paseo.app";
 export const ZCODE_APP_PATH = "/Applications/ZCode.app";
 export const OUTPUT_APP_PATH = "/Applications/PaseoZCode.app";

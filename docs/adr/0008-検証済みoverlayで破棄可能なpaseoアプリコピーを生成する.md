@@ -14,6 +14,8 @@ links:
   kind: amendedby
 - target: 13
   kind: amendedby
+- target: 15
+  kind: amendedby
 ---
 
 # 検証済みoverlayで破棄可能なPaseoアプリコピーを生成する

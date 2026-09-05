@@ -1,13 +1,16 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 
 import { patchAsar, readAsarEntry } from "../src/asar-patcher.js";
 import {
   ARTIFACT_ID,
   PATCH_FORMAT,
+  PASEO_SOURCE_ARCHIVE,
   TARGET_PASEO_COMMIT,
   TARGET_PASEO_RENDERER_RESOURCE,
   TARGET_PASEO_RENDERER_SHA256,
@@ -29,8 +32,8 @@ import {
 } from "../src/hashes.js";
 import type { OverlayEntry, PatchManifest } from "../src/manifest.js";
 
-const EXPECTED_SOURCE_ASAR =
-  "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b";
+import { downloadSourceArchive } from "./source-archive.js";
+
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const fixedOverlaySources = [
@@ -77,19 +80,6 @@ const fixedOverlaySources = [
   },
 ] as const;
 
-function option(name: string, fallback?: string): string {
-  const index = process.argv.indexOf(name);
-  if (index === -1) {
-    if (fallback !== undefined) return fallback;
-    throw new Error(`${name} is required`);
-  }
-  const value = process.argv[index + 1];
-  if (value === undefined || value.startsWith("--")) {
-    throw new Error(`${name} requires a value`);
-  }
-  return path.resolve(value);
-}
-
 async function run(
   command: string,
   args: readonly string[],
@@ -104,80 +94,6 @@ async function run(
       else if (code !== 0)
         reject(new Error(`${command} exited with ${String(code)}`));
       else resolve();
-    });
-  });
-}
-
-async function capture(
-  command: string,
-  args: readonly string[],
-  cwd: string,
-): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn(command, [...args], {
-      cwd,
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    let stdout = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (signal !== null)
-        reject(new Error(`${command} terminated by ${signal}`));
-      else if (code !== 0)
-        reject(new Error(`${command} exited with ${String(code)}`));
-      else resolve(stdout);
-    });
-  });
-}
-
-async function assertFixedCleanCheckout(checkout: string): Promise<void> {
-  const head = (await capture("git", ["rev-parse", "HEAD"], checkout)).trim();
-  if (head !== TARGET_PASEO_COMMIT) {
-    throw new Error(`Paseo checkout HEAD must be ${TARGET_PASEO_COMMIT}`);
-  }
-  if (
-    (await capture("git", ["status", "--porcelain=v1"], checkout)).trim() !== ""
-  ) {
-    throw new Error("Paseo checkout must be clean");
-  }
-}
-
-async function archiveCheckout(
-  checkout: string,
-  destination: string,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const archive = spawn("git", ["archive", "HEAD"], {
-      cwd: checkout,
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    const extract = spawn("tar", ["-x", "-C", destination], {
-      stdio: ["pipe", "inherit", "inherit"],
-    });
-    archive.stdout.pipe(extract.stdin);
-    let archiveCode: number | null = null;
-    let extractCode: number | null = null;
-    const finish = (): void => {
-      if (archiveCode === null || extractCode === null) return;
-      if (archiveCode === 0 && extractCode === 0) resolve();
-      else
-        reject(
-          new Error(`git archive/tar failed (${archiveCode}/${extractCode})`),
-        );
-    };
-    archive.once("error", reject);
-    extract.once("error", reject);
-    archive.once("exit", (code) => {
-      archiveCode = code;
-      finish();
-    });
-    extract.once("exit", (code) => {
-      extractCode = code;
-      finish();
     });
   });
 }
@@ -324,14 +240,26 @@ async function copyResourceOverlayFile(
 }
 
 async function main(): Promise<void> {
-  const checkout = option("--paseo-source");
-  const sourceAsar = option(
-    "--source-asar",
-    "/Applications/Paseo.app/Contents/Resources/app.asar",
+  const { values } = parseArgs({
+    options: {
+      "source-asar": {
+        type: "string",
+        default: "/Applications/Paseo.app/Contents/Resources/app.asar",
+      },
+    },
+    allowPositionals: false,
+  });
+  const sourceAsar = path.resolve(values["source-asar"]);
+  const expectedManifest: PatchManifest = JSON.parse(
+    await fs.readFile(
+      path.join(repositoryRoot, "manifests", `${ARTIFACT_ID}.json`),
+      "utf8",
+    ),
   );
   const sourceResources = path.dirname(sourceAsar);
-  await assertFixedCleanCheckout(checkout);
-  if ((await sha256File(sourceAsar)) !== EXPECTED_SOURCE_ASAR) {
+  if (
+    (await sha256File(sourceAsar)) !== expectedManifest.paseo.sourceAsarSha256
+  ) {
     throw new Error(
       "source ASAR does not match the supported Paseo 0.7.2 arm64 artifact",
     );
@@ -341,7 +269,8 @@ async function main(): Promise<void> {
     path.join(os.tmpdir(), "paseo-zcode-overlay-"),
   );
   try {
-    await archiveCheckout(checkout, temporaryRoot);
+    console.log(`Downloading verified Paseo source ${TARGET_PASEO_COMMIT}`);
+    await downloadSourceArchive(PASEO_SOURCE_ARCHIVE, temporaryRoot);
     await run(
       "git",
       [
@@ -451,8 +380,8 @@ async function main(): Promise<void> {
     if (!artifactDirectory.startsWith(artifactsRoot)) {
       throw new Error("artifact path failed strict validation");
     }
-    await fs.rm(artifactDirectory, { recursive: true, force: true });
-    const overlayDirectory = path.join(artifactDirectory, "overlay");
+    const generatedDirectory = path.join(temporaryRoot, "generated-artifact");
+    const overlayDirectory = path.join(generatedDirectory, "overlay");
     await fs.mkdir(overlayDirectory, { recursive: true });
     const sources = [
       ...fixedOverlaySources,
@@ -485,7 +414,7 @@ async function main(): Promise<void> {
         commit: TARGET_PASEO_COMMIT,
         platform: "darwin",
         arch: "arm64",
-        sourceAsarSha256: EXPECTED_SOURCE_ASAR,
+        sourceAsarSha256: expectedManifest.paseo.sourceAsarSha256,
         patchedAsarSha256: "",
       },
       zcode: {
@@ -510,24 +439,32 @@ async function main(): Promise<void> {
     const firstHash = await patchAsar(
       sourceAsar,
       first,
-      artifactDirectory,
+      generatedDirectory,
       manifest,
     );
     const secondHash = await patchAsar(
       sourceAsar,
       second,
-      artifactDirectory,
+      generatedDirectory,
       manifest,
     );
     if (firstHash !== secondHash) {
       throw new Error("overlay generation is not byte-for-byte deterministic");
     }
     manifest.paseo.patchedAsarSha256 = firstHash;
+    assert.deepStrictEqual(
+      manifest,
+      expectedManifest,
+      "Generated overlay does not match the verified manifest",
+    );
     await fs.writeFile(
-      path.join(artifactDirectory, "manifest.json"),
+      path.join(generatedDirectory, "manifest.json"),
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
-    console.log(`Generated ${artifactDirectory}`);
+    await fs.rm(artifactDirectory, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(artifactDirectory), { recursive: true });
+    await fs.cp(generatedDirectory, artifactDirectory, { recursive: true });
+    console.log(`Generated and verified ${artifactDirectory}`);
     console.log(`Overlay SHA-256: ${overlayHash}`);
     console.log(`Patched ASAR SHA-256: ${firstHash}`);
   } finally {
