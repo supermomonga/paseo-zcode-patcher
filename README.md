@@ -1,19 +1,19 @@
 # paseo-zcode-patcher
 
-Paseo 0.7.2 に ZCode 3.11.2 専用の組み込みプロバイダーを追加した、ローカル用の macOS arm64 アプリコピーを生成します。ACP や外部 `zcode-acp` プロセスは実行経路に含みません。
+Creates a local macOS arm64 app copy of Paseo 0.7.2 with a built-in provider for ZCode 3.11.2. Neither ACP nor an external `zcode-acp` process is part of the execution path.
 
-## 対応環境
+## Supported environment
 
 - macOS arm64
-- Node.js 22.12.0 以上
-- `/Applications/Paseo.app` 公式 0.7.2（対応 ASAR の SHA-256 を厳密検証）
-- `/Applications/ZCode.app` 公式 3.11.2 / CLI 0.16.5
+- Node.js 22.12.0 or later
+- Official Paseo 0.7.2 at `/Applications/Paseo.app` (the supported ASAR is strictly verified by its SHA-256 hash)
+- Official ZCode 3.11.2 / CLI 0.16.5 at `/Applications/ZCode.app`
 
-上記以外のバージョン、別のインストール先、変更済み ZCode host は拒否します。互換性を推測するフォールバックはありません。
+Other versions, alternative installation paths, and modified ZCode hosts are rejected. There is no fallback that assumes compatibility.
 
-## 使用方法
+## Usage
 
-Paseo、ZCode、および `zcode-acp` など ZCode host を利用するプロセスを終了してから実行します。
+Quit Paseo, ZCode, and any processes that use the ZCode host, such as `zcode-acp`, before running:
 
 ```console
 npm ci --ignore-scripts
@@ -21,15 +21,15 @@ npm run build
 node dist/src/cli.js patch
 ```
 
-成功すると `/Applications/PaseoZCode.app` が作成されます。元の `/Applications/Paseo.app` と `/Applications/ZCode.app` は変更しません。既存の出力がある場合は、すべての事前検証が成功した後に限り置き換えます。
+On success, the patcher creates `/Applications/PaseoZCode.app`. The original `/Applications/Paseo.app` and `/Applications/ZCode.app` remain unchanged. If an output app already exists, it is replaced only after all preflight checks pass.
 
-固定対象では、生成 ASAR とrenderer resourceのhash、strict 署名、3 回の独立した cold start、ZCode の 4 model、既存 `PlanCard`、GLM Agentと同じZ.ai iconの表示まで実機確認済みです。結果は [実装状況](docs/implementation-status.md) を参照してください。
+For the pinned versions, testing on a physical machine has verified the generated ASAR and renderer resource hashes, strict code signature validation, three independent cold starts, all four ZCode models, the existing `PlanCard`, and the same Z.ai icon used by GLM Agent. See [Implementation status](docs/implementation-status.md) for the results.
 
-Plan承認後のモード同期と、新規作成画面でPlan直前に選んだモードの引き継ぎを修正し、`/Applications/PaseoZCode.app`へ反映済みです。実機で`build` / `edit` / `yolo`への復帰を確認しました。実画面でも初回送信前の`Full access → Plan`から承認後に`Full access`へ戻り、同じturnで実装が完了しました。別の新規画面を最初からPlanで開く場合は、前の画面の復帰先を引き継がず`Ask before changes`へ戻ることを確認しています。
+Mode synchronization after Plan approval and preservation of the mode selected immediately before Plan in the new-session form have been fixed and applied to `/Applications/PaseoZCode.app`. Testing on a physical machine confirmed a return to `build`, `edit`, and `yolo`. UI testing also confirmed that selecting `Full access → Plan` before the first submission returns to `Full access` after approval and completes implementation in the same turn. Opening a separate new-session form directly in Plan returns to `Ask before changes`, without inheriting the previous form's return mode.
 
-## 開発と検証
+## Development and verification
 
-ZCodeセッションでも、マイク左の円アイコンからコンテキスト使用量と使用中の接続先の個人契約クオータを確認できます。公式hostの現在値を使用し、圧縮・モデル変更・再開に追従します。接続先名、プラン、使用率、残量、リセット時刻を既存カードへ表示し、未対応・取得失敗は明示します。Team Planは対象外です。生成アプリとZCode公式画面で数値を照合済みです。追加のリセット残数・端末のローカル時刻とUTCオフセット付きの期限表示（例: `2026-10-02 00:59 +09:00`）と、5時間→週間→月間ツールの並び順も実装済みです（アプリ反映状況は実装状況を参照）。
+In ZCode sessions, the circular icon to the left of the microphone shows context usage and personal subscription quotas for the active connection. It uses current values from the official host and stays in sync through compaction, model changes, and session resumption. The existing card displays the connection name, plan, usage percentage, remaining quota, and reset time, with explicit messages for unsupported features or retrieval failures. Team Plan is outside the supported scope. The values have been cross-checked between the generated app and the official ZCode UI. Remaining additional resets and expiration times in the device's local time with a UTC offset (for example, `2026-10-02 00:59 +09:00`) are also implemented, along with quota ordering of five-hour, weekly, then monthly tool usage. See Implementation status for whether these changes have been applied to the app.
 
 ```console
 npm test
@@ -39,18 +39,18 @@ npm run format:check
 npm audit
 ```
 
-固定 Paseo source commit のクリーンな checkout から overlay を再生成する場合:
+To regenerate the overlay from a clean checkout of the pinned Paseo source commit:
 
 ```console
 npm run build:overlay -- --paseo-source /path/to/paseo-at-9400a49af670fdb5db4af58e73f8df98588dbea9
 ```
 
-詳細な仕様、セキュリティ境界、実機検証項目は [docs/README.md](docs/README.md) を参照してください。
+See [docs/README.md](docs/README.md) for detailed specifications, security boundaries, and checks to run on a physical machine.
 
-## データと資格情報
+## Data and credentials
 
-プロバイダーはインストール済み ZCode の公式 host service を使います。ZCode のログイン、資格情報、モデルプロバイダー設定は ZCode が所有し、このパッチャーは作成・更新・コピーしません。プロンプト、workspace 情報、モデル通信は ZCode の利用条件とプライバシーポリシーに従います。Paseo 側の履歴保存とログは別に管理されます。
+The provider uses the official host service from the installed ZCode app. ZCode owns its login state, credentials, and model provider settings; this patcher does not create, update, or copy them. Prompts, workspace information, and model communications are subject to ZCode's terms of use and privacy policy. Paseo's history storage and logs are managed separately.
 
-## 配布
+## Distribution
 
-Paseo と ZCode のアプリ本体は同梱しません。現在、参照した非公開プロジェクトの配布ライセンスが明示されていないため、この package は `private` のままです。公開配布前に [NOTICE](NOTICE) と [docs/security-and-licensing.md](docs/security-and-licensing.md) の条件を確認してください。
+The Paseo and ZCode applications are not bundled. This package remains `private` because the distribution licenses of the referenced private projects have not been explicitly specified. Before public distribution, review the conditions in [NOTICE](NOTICE) and [docs/security-and-licensing.md](docs/security-and-licensing.md).
