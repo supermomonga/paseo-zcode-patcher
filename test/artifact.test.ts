@@ -21,7 +21,7 @@ describe("release artifact", () => {
       sourceAsarSha256:
         "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
       patchedAsarSha256:
-        "94ef5d7b9e9c104bce7f1e06adbd0e94817b5e39e4a87486bb1aaa982b9d198b",
+        "047ef7bd7c061e2fbaedb73c411c0e611fea6306c3cf674d9e5001b69229d534",
     });
     expect(manifest.zcode).toMatchObject({
       appVersion: "3.11.2",
@@ -32,7 +32,7 @@ describe("release artifact", () => {
     });
     expect(manifest.entries).toHaveLength(26);
     expect(manifest.overlayHash).toBe(
-      "17149da7c6901141ffa8fa878a40088e4d54e9bf070da3787a8ea52ff84243fd",
+      "be8c60fbdd29c50724d8ecfb133e2cc6b6f1be479e0a7fb732dd5cf03442478e",
     );
     for (const suffix of [
       "protocol/dist/messages.js",

@@ -28,8 +28,8 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | ASAR overlay entry 数 | 26 |
 | renderer resource entry 数 | 1 |
 | renderer resource SHA-256 | `0449533ce96288b2771b5646a38844fed6e25749acf74927a4a2635234670160` |
-| overlay SHA-256 | `17149da7c6901141ffa8fa878a40088e4d54e9bf070da3787a8ea52ff84243fd` |
-| 生成後 `app.asar` SHA-256 | `94ef5d7b9e9c104bce7f1e06adbd0e94817b5e39e4a87486bb1aaa982b9d198b` |
+| overlay SHA-256 | `be8c60fbdd29c50724d8ecfb133e2cc6b6f1be479e0a7fb732dd5cf03442478e` |
+| 生成後 `app.asar` SHA-256 | `047ef7bd7c061e2fbaedb73c411c0e611fea6306c3cf674d9e5001b69229d534` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -168,6 +168,12 @@ Coding Planのクオータは5時間・週間・月間ツールの順に固定�
 ローカル時刻への変更では、UTC・日本時間・30分単位の時差・夏時間の有無を含む5 testを追加した。日本時間で`2026-10-02 00:59 +09:00`となることを確認し、対象testは計487件成功した。日時はUTCのISO文字列と`valueFormat: "datetime"`をprotocolで転送し、表示端末の`Intl.DateTimeFormat`で整形する。新しいfieldを検証する生成済み通信validatorもoverlayへ追加した。
 
 アプリへの反映は、起動中の関連processをパッチャーが検出したため停止した。関連アプリの終了後に再実行し、画面を確認する必要がある。現在のmanifestは新しい生成物を表し、インストール済みアプリは更新待ちである。
+
+### 使用量表示の英語文言
+
+利用者の指定によりi18n化は行わず、ZCode providerが生成する使用量・クオータの日本語文言を英語へ変更した。クオータは`5-hour → Weekly → Monthly tools`、リセット残数は`5-hour resets` / `Weekly resets`、期限は`Earliest expiry`。回数は数値だけを表示する。取得失敗・未対応・未契約・ログイン要求・モデル変更時のメッセージとStart Planの残量ラベルも英語に統一した。公式の接続先名・プラン名・モデル名は変更していない。
+
+変更はproviderと既存testの文言に限り、i18n用の通信拡張やrenderer変更は追加していない。ローカル日時の`2026-10-02 00:59 +09:00`形式、クオータの順序、月間ツール残量の非表示は維持する。対象session/usage test 55件が成功し、usage source/testのlintは0 error・0 warningだった。固定sourceからの再生成では全487 testとprotocol/client/server/app型検査が成功し、patcherの20 test・型検査・整形確認も成功した。rendererと他のruntime entryは不変で、生成物の変更はagent.js・usage.jsとmanifestに限られる。アプリ反映を再試行したが起動中の関連processを検出したため停止しており、今回もprocessは自動終了していない。
 
 ## 配布上の制約
 

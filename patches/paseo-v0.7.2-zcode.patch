@@ -1875,7 +1875,7 @@ index 0000000000000000000000000000000000000000..5d317cd504a1e815bf26577b9f043c2e
 +});
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.ts b/packages/server/src/server/agent/providers/zcode/agent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..0d5a6eda6591ad8ca687bbe69094d89c7618a6ef
+index 0000000000000000000000000000000000000000..0fd3c7b7eef84bec021e36f1dcfee7bc93ded465
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.ts
 @@ -0,0 +1,1698 @@
@@ -2452,7 +2452,7 @@ index 0000000000000000000000000000000000000000..0d5a6eda6591ad8ca687bbe69094d89c
 +    const usage = await this.usageReader.read(this.snapshot.settings.model.current.providerId);
 +    return model === encodeModel(this.snapshot.settings.model.current)
 +      ? usage
-+      : unavailableZCodeUsage("モデルが変更されました。表示を開き直してください。");
++      : unavailableZCodeUsage("The model changed. Reopen the tooltip to refresh usage.");
 +  }
 +
 +  async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
@@ -7103,7 +7103,7 @@ index 0000000000000000000000000000000000000000..731659ccc65d237ce5486eff39430700
 +export type NativeEnvelope = z.infer<typeof NativeEnvelopeSchema>;
 diff --git a/packages/server/src/server/agent/providers/zcode/usage.test.ts b/packages/server/src/server/agent/providers/zcode/usage.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d25bc3e477
+index 0000000000000000000000000000000000000000..47e05900084306c16bb3343bafb2cd70e44dfe94
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/usage.test.ts
 @@ -0,0 +1,240 @@
@@ -7179,7 +7179,7 @@ index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d2
 +      }),
 +      raw.provider.id,
 +    );
-+    expect(result.windows.map((item) => item.label)).toEqual(["5時間", "週間", "月間ツール"]);
++    expect(result.windows.map((item) => item.label)).toEqual(["5-hour", "Weekly", "Monthly tools"]);
 +    expect(result.details).toEqual([]);
 +  });
 +  it("counts only unexpired resets and shows the earliest expiry for each kind", () => {
@@ -7188,23 +7188,23 @@ index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d2
 +      availableWeekResets: [{ expireAt: 240000 }],
 +    });
 +    expect(resetDetails(status, 1000)).toEqual([
-+      { id: "reset:five-hour", label: "5時間リセット", value: "2回" },
++      { id: "reset:five-hour", label: "5-hour resets", value: "2" },
 +      {
 +        id: "reset:five-hour:expires",
-+        label: "最短期限",
++        label: "Earliest expiry",
 +        value: "1970-01-01T00:02:00.000Z",
 +        valueFormat: "datetime",
 +      },
-+      { id: "reset:week", label: "週間リセット", value: "1回" },
++      { id: "reset:week", label: "Weekly resets", value: "1" },
 +      {
 +        id: "reset:week:expires",
-+        label: "最短期限",
++        label: "Earliest expiry",
 +        value: "1970-01-01T00:04:00.000Z",
 +        valueFormat: "datetime",
 +      },
 +    ]);
 +    expect(resetDetails(status, 240000)).toEqual([
-+      { id: "reset:count", label: "リセット残数", value: "0回" },
++      { id: "reset:count", label: "Available resets", value: "0" },
 +    ]);
 +  });
 +  it("keeps quota available when reset status fails or is malformed", async () => {
@@ -7220,7 +7220,7 @@ index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d2
 +      expect(result.status).toBe("available");
 +      expect(result.windows).toHaveLength(1);
 +      expect(result.details).toEqual([
-+        { id: "reset:error", label: "リセット残数", value: "取得できませんでした" },
++        { id: "reset:error", label: "Available resets", value: "Unable to load" },
 +      ]);
 +      expect(bridge.request).toHaveBeenCalledWith(
 +        "getCodingPlanResetStatus",
@@ -7249,7 +7249,7 @@ index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d2
 +      planLabel: "Pro",
 +      status: "available",
 +      windows: [
-+        { label: "5時間", usedPct: 25, remainingPct: 75, resetsAt: "1970-01-01T00:01:40.000Z" },
++        { label: "5-hour", usedPct: 25, remainingPct: 75, resetsAt: "1970-01-01T00:01:40.000Z" },
 +      ],
 +    });
 +  });
@@ -7349,7 +7349,7 @@ index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d2
 +});
 diff --git a/packages/server/src/server/agent/providers/zcode/usage.ts b/packages/server/src/server/agent/providers/zcode/usage.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f95658ff1
+index 0000000000000000000000000000000000000000..f212316354476c401b8729bf65dc0c48ba334089
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/usage.ts
 @@ -0,0 +1,271 @@
@@ -7398,18 +7398,18 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +): NonNullable<ProviderUsage["details"]> {
 +  const details: NonNullable<ProviderUsage["details"]> = [];
 +  const groups = [
-+    { id: "five-hour", label: "5時間リセット", items: status.availableFiveHourResets },
-+    { id: "week", label: "週間リセット", items: status.availableWeekResets },
++    { id: "five-hour", label: "5-hour resets", items: status.availableFiveHourResets },
++    { id: "week", label: "Weekly resets", items: status.availableWeekResets },
 +  ];
 +  for (const group of groups) {
 +    const available = group.items.filter((item) => item.expireAt > now);
 +    if (available.length === 0) continue;
 +    const expiresAt = Math.min(...available.map((item) => item.expireAt));
 +    details.push(
-+      { id: `reset:${group.id}`, label: group.label, value: `${available.length}回` },
++      { id: `reset:${group.id}`, label: group.label, value: `${available.length}` },
 +      {
 +        id: `reset:${group.id}:expires`,
-+        label: "最短期限",
++        label: "Earliest expiry",
 +        value: new Date(expiresAt).toISOString(),
 +        valueFormat: "datetime",
 +      },
@@ -7417,7 +7417,7 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +  }
 +  return details.length > 0
 +    ? details
-+    : [{ id: "reset:count", label: "リセット残数", value: "0回" }];
++    : [{ id: "reset:count", label: "Available resets", value: "0" }];
 +}
 +
 +const supportedProviders = new Set([
@@ -7450,10 +7450,10 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +      limit.usageDetails.map((item) => item.displayName ?? item.modelCode).join(" / ") || limit.type
 +    );
 +  if (limit.type === "TOKENS_LIMIT" || limit.type === "CREDIT_LIMIT") {
-+    if (limit.unit === 3 && limit.number === 5) return "5時間";
-+    if (limit.unit === 6) return "週間";
++    if (limit.unit === 3 && limit.number === 5) return "5-hour";
++    if (limit.unit === 6) return "Weekly";
 +  }
-+  if (limit.type === "TIME_LIMIT" && limit.unit === 5 && limit.number === 1) return "月間ツール";
++  if (limit.type === "TIME_LIMIT" && limit.unit === 5 && limit.number === 1) return "Monthly tools";
 +  return limit.type;
 +}
 +
@@ -7491,12 +7491,12 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +  if (raw.provider !== null && raw.provider.id !== providerId)
 +    throw new Error("ZCode quota provider mismatch");
 +  if (raw.context.scope !== "personal")
-+    return unavailableZCodeUsage("Team Planのクオータ表示には対応していません。");
++    return unavailableZCodeUsage("Team Plan quota is not supported.");
 +  const reasons = {
-+    not_configured: "この接続先のクオータを取得できません。",
-+    not_authenticated: "ZCodeでログインしてください。",
-+    no_plan: "有効な個人契約がありません。",
-+    unavailable: "クオータを取得できません。",
++    not_configured: "Quota is not available for this connection.",
++    not_authenticated: "Sign in to ZCode to view quota.",
++    no_plan: "No active individual plan.",
++    unavailable: "Quota is unavailable.",
 +  };
 +  if (!raw.authenticated || raw.unavailableReason) {
 +    return unavailableZCodeUsage(reasons[raw.unavailableReason ?? "not_authenticated"]);
@@ -7520,7 +7520,7 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +    if (startPlan && limit.remaining !== undefined) {
 +      details.push({
 +        id: `${id}:remaining`,
-+        label: `${label} 残量`,
++        label: `${label} remaining`,
 +        value: String(limit.remaining),
 +      });
 +    }
@@ -7553,7 +7553,7 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +  read(providerId: string): Promise<ProviderUsage> {
 +    if (!supportedProviders.has(providerId))
 +      return Promise.resolve(
-+        unavailableZCodeUsage("この接続先のクオータ表示には対応していません。"),
++        unavailableZCodeUsage("Quota display is not supported for this connection."),
 +      );
 +    if (this.cached?.key === providerId && this.now() - this.cached.at < 300_000)
 +      return Promise.resolve(this.cached.value);
@@ -7581,7 +7581,7 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +      );
 +      return resetDetails(status, this.now());
 +    } catch {
-+      return [{ id: "reset:error", label: "リセット残数", value: "取得できませんでした" }];
++      return [{ id: "reset:error", label: "Available resets", value: "Unable to load" }];
 +    }
 +  }
 +  private async fetch(providerId: string): Promise<ProviderUsage> {
@@ -7606,7 +7606,7 @@ index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f
 +      return usage;
 +    } catch {
 +      // Native errors can contain authentication details. Never forward them to the client.
-+      return unavailableZCodeUsage("ZCodeのクオータを取得できませんでした。", "error");
++      return unavailableZCodeUsage("Unable to load ZCode quota.", "error");
 +    }
 +  }
 +}
