@@ -6,7 +6,7 @@
     "platform": "darwin",
     "arch": "arm64",
     "sourceAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-    "patchedAsarSha256": "1f514af59386440db3de145d0d9c444a9f1dd1221302261676eb02056cafd485"
+    "patchedAsarSha256": "94ef5d7b9e9c104bce7f1e06adbd0e94817b5e39e4a87486bb1aaa982b9d198b"
   },
   "zcode": {
     "appVersion": "3.11.2",
@@ -25,7 +25,7 @@
   },
   "patchFormat": "header-preserving-append-v1",
   "markerPath": "paseo-zcode-patcher.json",
-  "overlayHash": "993e60d333cb2508d0a363a917e74cd6f178d1b02e14c96f5dd577da3bbff975",
+  "overlayHash": "17149da7c6901141ffa8fa878a40088e4d54e9bf070da3787a8ea52ff84243fd",
   "entries": [
     {
       "path": "node_modules/@getpaseo/client/dist/daemon-client.js",
@@ -34,9 +34,15 @@
       "originalSha256": "deb93899785d5fe410ce5dcd86c3abaf9f00cab79f70c2c6e4489433fea12b42"
     },
     {
+      "path": "node_modules/@getpaseo/protocol/dist/generated/validation/ws-outbound.aot.js",
+      "source": "node_modules/@getpaseo/protocol/dist/generated/validation/ws-outbound.aot.js",
+      "sha256": "a470e832e2bdfd43c01091607753d34946a831f17f9de8f538d4da085fe72b33",
+      "originalSha256": "a3c517f14a6089364b0f721ac3276b13a08c6d9176f9c3525edc8e0458f9415e"
+    },
+    {
       "path": "node_modules/@getpaseo/protocol/dist/messages.js",
       "source": "node_modules/@getpaseo/protocol/dist/messages.js",
-      "sha256": "a6a043600544c2e40a7cf7fd6b212a3f7a0d0865304dcc38b6f89003b96abe76",
+      "sha256": "d15ee343f9c2d3db33e94d0922220b2ea06f17cf331b7b1db414424248f4f21a",
       "originalSha256": "d22dda38388541744a088e0b6a5b6d4f018dfc06b1df53b8a344929e7a577302"
     },
     {
@@ -162,7 +168,7 @@
     {
       "path": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/usage.js",
       "source": "node_modules/@getpaseo/server/dist/server/server/agent/providers/zcode/usage.js",
-      "sha256": "afa9157e130b288673aa189c21ee70182c29572a789a021635571a271d770f6b",
+      "sha256": "95413815e9df0b486f02a7468bb8d9de4b97751d39c8988be4ce0c7bbe4b732a",
       "originalSha256": null
     },
     {
@@ -182,7 +188,7 @@
     {
       "path": "app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
       "source": "resources/app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
-      "sha256": "de8cd924588d4e832e28f4f0c1665ecc12f0f3ef4d1c87e26cab079ef62e6ce6",
+      "sha256": "0449533ce96288b2771b5646a38844fed6e25749acf74927a4a2635234670160",
       "originalSha256": "e0bf84a5218b90f1575ead487f4cce8d20f06027eb76df1a9efdef9283c2cdc8"
     }
   ]

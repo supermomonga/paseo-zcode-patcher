@@ -35,6 +35,11 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const fixedOverlaySources = [
   {
+    source: "packages/protocol/dist/generated/validation/ws-outbound.aot.js",
+    target:
+      "node_modules/@getpaseo/protocol/dist/generated/validation/ws-outbound.aot.js",
+  },
+  {
     source: "packages/protocol/dist/messages.js",
     target: "node_modules/@getpaseo/protocol/dist/messages.js",
   },
@@ -366,6 +371,7 @@ async function main(): Promise<void> {
         "packages/server/src/server/session/provider/provider-catalog-session.test.ts",
         "packages/client/src/daemon-client.test.ts",
         "packages/app/src/components/provider-icon-name.test.ts",
+        "packages/app/src/provider-usage/format.test.ts",
         "packages/app/src/provider-selection/resolve-agent-form.test.ts",
         "packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts",
         "packages/app/src/composer/draft/workspace-tab.test.ts",

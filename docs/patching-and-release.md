@@ -67,7 +67,7 @@ marker pathは`paseo-zcode-patcher.json`とし、次を含める。
   "paseoVersion": "0.7.2",
   "paseoSourceCommit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
   "originalAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-  "overlaySha256": "993e60d333cb2508d0a363a917e74cd6f178d1b02e14c96f5dd577da3bbff975",
+  "overlaySha256": "17149da7c6901141ffa8fa878a40088e4d54e9bf070da3787a8ea52ff84243fd",
   "zcodeArtifact": "zcode-host-3.11.2",
   "zcodeProtocol": "zcode-task-v1",
   "zcodeAcpReferenceCommit": "7b3af187d7ee732e9043aed873a863fc855625c2",
@@ -131,4 +131,4 @@ patcherは次を行わない。
 
 初版releaseはnpm package/CLI sourceとversion固定overlay/manifestを含む。overlayには固定Paseo sourceから生成したmain renderer bundle 1 fileを含むが、PaseoまたはZCodeの完全なアプリ本体は含めない。release前にlockfile、checksums、dependency license一覧を検証する。生成済み`PaseoZCode.app`自体は配布しない。
 
-通常の`node_modules/`はrepositoryで追跡しないが、`artifacts/*/overlay/node_modules/`はASARへ適用するversion固定成果物なので例外として追跡する。クリーンなcheckoutから`npm pack --dry-run`を実行し、manifestが参照するASAR 25 entryとrenderer resource 1 entryがpackageへ含まれることを確認する。
+通常の`node_modules/`はrepositoryで追跡しないが、`artifacts/*/overlay/node_modules/`はASARへ適用するversion固定成果物なので例外として追跡する。クリーンなcheckoutから`npm pack --dry-run`を実行し、manifestが参照するASAR 26 entryとrenderer resource 1 entryがpackageへ含まれることを確認する。

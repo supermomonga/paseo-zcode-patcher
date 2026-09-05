@@ -190,6 +190,66 @@ index 9fa187200e6bdc0f2e0b0f5217628512d51aabe0..b35ae850e2ebb3f57037f3f47478a0ed
 +    form: { ...rest, ...(planReturnMode !== undefined ? { planReturnMode } : {}) },
 +  };
 +}
+diff --git a/packages/app/src/provider-usage/card.tsx b/packages/app/src/provider-usage/card.tsx
+index 10ef161fcc751c1d32932231f861f8e06496112f..a27ffa9b0ffcad9f4eab1a1b84ddfe3d3fdd015d 100644
+--- a/packages/app/src/provider-usage/card.tsx
++++ b/packages/app/src/provider-usage/card.tsx
+@@ -8 +8 @@ import { ProviderUsageBalanceBar } from "./balance-bar";
+-import { formatAgo } from "./format";
++import { formatAgo, formatLocalDateTime } from "./format";
+@@ -107 +107,3 @@ export function ProviderUsageCard({
+-                {detail.value}
++                {detail.valueFormat === "datetime"
++                  ? formatLocalDateTime(detail.value)
++                  : detail.value}
+diff --git a/packages/app/src/provider-usage/format.test.ts b/packages/app/src/provider-usage/format.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b302d7b24a2374fc074b08318b220a57b366d7e7
+--- /dev/null
++++ b/packages/app/src/provider-usage/format.test.ts
+@@ -0,0 +1,21 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { formatLocalDateTime } from "./format";
++
++const DateTimeFormat = Intl.DateTimeFormat;
++afterEach(() => vi.restoreAllMocks());
++
++describe("local expiry formatting", () => {
++  it.each([
++    ["Asia/Tokyo", "2026-10-01T15:59:59.000Z", "2026-10-02 00:59 +09:00"],
++    ["UTC", "2026-10-01T15:59:59.000Z", "2026-10-01 15:59 +00:00"],
++    ["Asia/Kolkata", "2026-10-01T15:59:59.000Z", "2026-10-01 21:29 +05:30"],
++    ["America/New_York", "2026-07-01T15:59:59.000Z", "2026-07-01 11:59 -04:00"],
++    ["America/New_York", "2026-12-01T15:59:59.000Z", "2026-12-01 10:59 -05:00"],
++  ])("uses the viewing device timezone %s at %s", (timeZone, iso, expected) => {
++    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (locale, options) {
++      expect(options?.timeZone).toBeUndefined();
++      return new DateTimeFormat(locale, { ...options, timeZone });
++    });
++    expect(formatLocalDateTime(iso)).toBe(expected);
++  });
++});
+diff --git a/packages/app/src/provider-usage/format.ts b/packages/app/src/provider-usage/format.ts
+index d903818f48d4e9d0a65c330369b8084cbb0f0377..9ea80259554e1624e45cacef78a33e70817278ec 100644
+--- a/packages/app/src/provider-usage/format.ts
++++ b/packages/app/src/provider-usage/format.ts
+@@ -53,0 +54,16 @@ export function formatAmount(value: number, unit: ProviderUsageBalanceUnit): str
++
++/** Format in the viewing device's timezone, including the offset at this instant. */
++export function formatLocalDateTime(iso: string): string {
++  const parts = new Intl.DateTimeFormat("en-GB", {
++    year: "numeric",
++    month: "2-digit",
++    day: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++    hourCycle: "h23",
++    timeZoneName: "longOffset",
++  }).formatToParts(new Date(iso));
++  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
++  const offset = values.timeZoneName === "GMT" ? "+00:00" : values.timeZoneName!.replace("GMT", "");
++  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute} ${offset}`;
++}
 diff --git a/packages/app/src/provider-usage/use-provider-usage.test.tsx b/packages/app/src/provider-usage/use-provider-usage.test.tsx
 new file mode 100644
 index 0000000000000000000000000000000000000000..5f94a5e31d1295b65a8222fdb7ea4a2d28b37a17
@@ -439,11 +499,13 @@ index 238b33461184f4150006114e3a4a2b65032e1393..8d9c7b77748a1c9657cd5fb26fbe1351
 @@ -4832,0 +4836 @@ export class DaemonClient {
 +        ...(options?.agentId ? { agentId: options.agentId } : {}),
 diff --git a/packages/protocol/src/messages.ts b/packages/protocol/src/messages.ts
-index 93f6be9ef91d84c88329f5ea7fe9ffa06d8846b3..fa1a8f8f258df422bf2989fe9c10d509003b4b73 100644
+index 93f6be9ef91d84c88329f5ea7fe9ffa06d8846b3..ca0bd878b257916daa48bf7834a9d83ce07e98ab 100644
 --- a/packages/protocol/src/messages.ts
 +++ b/packages/protocol/src/messages.ts
 @@ -1705,0 +1706 @@ export const ProviderUsageListRequestMessageSchema = z.object({
 +  agentId: z.string().optional(),
+@@ -5838,0 +5840 @@ export const ProviderUsageDetailSchema = z.object({
++  valueFormat: z.literal("datetime").optional(),
 diff --git a/packages/protocol/src/provider-config.ts b/packages/protocol/src/provider-config.ts
 index 2ab879c31ff4f3578d0050d66d8fe49b20adfb6d..854bf02426b43b4e39415cc588bdfa942257c69c 100644
 --- a/packages/protocol/src/provider-config.ts
@@ -7041,10 +7103,10 @@ index 0000000000000000000000000000000000000000..731659ccc65d237ce5486eff39430700
 +export type NativeEnvelope = z.infer<typeof NativeEnvelopeSchema>;
 diff --git a/packages/server/src/server/agent/providers/zcode/usage.test.ts b/packages/server/src/server/agent/providers/zcode/usage.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..5ece44a59b575beb1f71d730457eafe9643ec1b7
+index 0000000000000000000000000000000000000000..4cea2ae8d4ad98e0e73af2d8f5fe62d25bc3e477
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/usage.test.ts
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,240 @@
 +import { describe, expect, it, vi } from "vitest";
 +import type { z } from "zod";
 +import {
@@ -7127,9 +7189,19 @@ index 0000000000000000000000000000000000000000..5ece44a59b575beb1f71d730457eafe9
 +    });
 +    expect(resetDetails(status, 1000)).toEqual([
 +      { id: "reset:five-hour", label: "5時間リセット", value: "2回" },
-+      { id: "reset:five-hour:expires", label: "最短期限 (UTC)", value: "1970-01-01 00:02" },
++      {
++        id: "reset:five-hour:expires",
++        label: "最短期限",
++        value: "1970-01-01T00:02:00.000Z",
++        valueFormat: "datetime",
++      },
 +      { id: "reset:week", label: "週間リセット", value: "1回" },
-+      { id: "reset:week:expires", label: "最短期限 (UTC)", value: "1970-01-01 00:04" },
++      {
++        id: "reset:week:expires",
++        label: "最短期限",
++        value: "1970-01-01T00:04:00.000Z",
++        valueFormat: "datetime",
++      },
 +    ]);
 +    expect(resetDetails(status, 240000)).toEqual([
 +      { id: "reset:count", label: "リセット残数", value: "0回" },
@@ -7277,10 +7349,10 @@ index 0000000000000000000000000000000000000000..5ece44a59b575beb1f71d730457eafe9
 +});
 diff --git a/packages/server/src/server/agent/providers/zcode/usage.ts b/packages/server/src/server/agent/providers/zcode/usage.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..39a7de839ef0c5b0b67fa6df4d36b02978ac131d
+index 0000000000000000000000000000000000000000..c9cd8a710decd47b1930bdcd7376f93f95658ff1
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/usage.ts
-@@ -0,0 +1,270 @@
+@@ -0,0 +1,271 @@
 +import { z } from "zod";
 +import type { ProviderUsage, ProviderUsageWindow } from "../../../messages.js";
 +import type { HostBridge } from "./host/bridge.js";
@@ -7337,8 +7409,9 @@ index 0000000000000000000000000000000000000000..39a7de839ef0c5b0b67fa6df4d36b029
 +      { id: `reset:${group.id}`, label: group.label, value: `${available.length}回` },
 +      {
 +        id: `reset:${group.id}:expires`,
-+        label: "最短期限 (UTC)",
-+        value: new Date(expiresAt).toISOString().slice(0, 16).replace("T", " "),
++        label: "最短期限",
++        value: new Date(expiresAt).toISOString(),
++        valueFormat: "datetime",
 +      },
 +    );
 +  }

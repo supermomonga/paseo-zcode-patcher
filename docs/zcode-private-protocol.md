@@ -109,7 +109,7 @@ disposeWorkspace
 
 公式rendererの`kF` / `tzt`はCoding Planの`percentage`を使用率0〜100として扱う。一方、hostの`cde`とrendererの`rot`はStart Planの`percentage`を残量比率0〜1として扱う。両者を同じ変換にしない。`nextResetTime`はミリ秒単位である。`unit` / `number`はCoding Planでは時間窓の識別にも使われるため、一律にクオータの総量と解釈しない。
 
-`getCodingPlanResetStatus`は`availableFiveHourResets`と`availableWeekResets`の各要素にミリ秒の`expireAt`を返す。公式hostの`resolveCodingPlanResetAuthorization`は接続先を厳密に指定し、ZCodeと契約先のJWTを自身で読む。公式rendererの`vWe`と同様に期限切れを除き、枠ごとの残数と最短期限を表示する。履歴フィールドは表示にも認証にも不要なため取得schemaに含めない。
+`getCodingPlanResetStatus`は`availableFiveHourResets`と`availableWeekResets`の各要素にミリ秒の`expireAt`を返す。公式hostの`resolveCodingPlanResetAuthorization`は接続先を厳密に指定し、ZCodeと契約先のJWTを自身で読む。公式rendererの`vWe`と同様に期限切れを除き、枠ごとの残数と最短期限を表示する。期限はUTCのISO日時で転送し、表示端末のローカル時刻とUTCオフセットへ変換する。履歴フィールドは表示にも認証にも不要なため取得schemaに含めない。
 
 subscriptionは`onDynamicSessionEvent`だけを使用し、内部bridgeでは専用のsubscribe/unsubscribe operationとして扱う。
 

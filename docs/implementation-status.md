@@ -15,7 +15,7 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | ZCode runtime discovery | complete | app/CLI/host/RPC の version、hash、export、path を実機と自動テストで検証 |
 | Host bridge | complete | method allowlist、schema、request 相関、上限、timeout、終了処理を実装 |
 | Provider/session mapper | complete | catalog、stream、履歴、permission、question、plan、todo、cancel を実装 |
-| Overlay/manifest | complete | ASAR 25 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
+| Overlay/manifest | complete | ASAR 26 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
 | Provider runtime evidence | verified | 今回の実機hostでコンテキスト現在値・再開後の値・個人契約クオータの一致を確認 |
 | macOS app/signing | verified | 今回の`/Applications/PaseoZCode.app`でmanifest hash一致、元Paseo ASAR不変、strict署名を確認。3回の独立cold startは過去の検証 |
 | UI integration | verified | 今回の実画面で円アイコン・コンテキスト・契約名・クオータを確認し、ZCode公式の個人契約表示と照合 |
@@ -25,11 +25,11 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | 項目 | 値 |
 | --- | --- |
 | package | `paseo-zcode-patcher@0.1.0`、`private: true` |
-| ASAR overlay entry 数 | 25 |
+| ASAR overlay entry 数 | 26 |
 | renderer resource entry 数 | 1 |
-| renderer resource SHA-256 | `de8cd924588d4e832e28f4f0c1665ecc12f0f3ef4d1c87e26cab079ef62e6ce6` |
-| overlay SHA-256 | `993e60d333cb2508d0a363a917e74cd6f178d1b02e14c96f5dd577da3bbff975` |
-| 生成後 `app.asar` SHA-256 | `1f514af59386440db3de145d0d9c444a9f1dd1221302261676eb02056cafd485` |
+| renderer resource SHA-256 | `0449533ce96288b2771b5646a38844fed6e25749acf74927a4a2635234670160` |
+| overlay SHA-256 | `17149da7c6901141ffa8fa878a40088e4d54e9bf070da3787a8ea52ff84243fd` |
+| 生成後 `app.asar` SHA-256 | `94ef5d7b9e9c104bce7f1e06adbd0e94817b5e39e4a87486bb1aaa982b9d198b` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -157,13 +157,15 @@ patcherの通常testは20件成功・実機opt-in testは1件skip、型検査・
 
 ### リセット残数・期限とクオータ表示順
 
-公式hostの`getEntitlementSnapshot`にはリセット権が含まれないため、同じ`usage-stats`の読み取りAPI `getCodingPlanResetStatus`を追加した。現在のCoding Plan接続先を指定し、公式hostの厳密な接続先解決と資格情報取得を使用する。5時間・週間の各配列から期限切れを除外し、残数と最短期限（UTC）を既存カードへ表示する。取得失敗時は通常クオータを保持し、リセット情報だけ取得失敗として表示する。消費・請求・履歴既読化のAPIは許可していない。
+公式hostの`getEntitlementSnapshot`にはリセット権が含まれないため、同じ`usage-stats`の読み取りAPI `getCodingPlanResetStatus`を追加した。現在のCoding Plan接続先を指定し、公式hostの厳密な接続先解決と資格情報取得を使用する。5時間・週間の各配列から期限切れを除外し、残数と最短期限を既存カードへ表示する。期限は端末のローカル時刻とUTCオフセット付きとする。取得失敗時は通常クオータを保持し、リセット情報だけ取得失敗として表示する。消費・請求・履歴既読化のAPIは許可していない。
 
-Coding Planのクオータは5時間・週間・月間ツールの順に固定し、月間ツールの残量行を削除した。Start Planの残量は引き続き表示する。rendererは前回と同一で、providerから渡す既存`windows`と`details`だけを変更している。
+Coding Planのクオータは5時間・週間・月間ツールの順に固定し、月間ツールの残量行を削除した。Start Planの残量は引き続き表示する。日時の詳細行に任意の`valueFormat: "datetime"`を追加し、UTCのISO日時をrenderer側でローカル時刻へ整形する。通常の文字列の詳細行はそのまま表示する。接続先hostと表示端末のタイムゾーンが異なっても、表示端末の設定に従う。
 
-2026-09-05 22:57 JSTの実機hostは`availableFiveHourResets: []`、`availableWeekResets: [{ expireAt: 1790870399000 }]`を返した。変換後の表示は「週間リセット 1回」「最短期限 (UTC) 2026-10-01 15:59」。これはJSTの2026-10-02 00:59に相当し、公式画面の「1 reset available」「Expires in 26d 2h」と整合する。リセット権の消費は行っていない。
+2026-09-05 22:57 JSTの実機hostは`availableFiveHourResets: []`、`availableWeekResets: [{ expireAt: 1790870399000 }]`を返した。当初のUTC表示は「週間リセット 1回」「最短期限 (UTC) 2026-10-01 15:59」だった。利用者の指定に合わせ、現在は端末側で変換し、日本時間では「最短期限 2026-10-02 00:59 +09:00」と表示する。この期限は公式画面の「1 reset available」「Expires in 26d 2h」と整合する。リセット権の消費は行っていない。
 
-対象testは482件（356件＋app 126件）成功。今回変更した5 source fileのlintは0 error・0 warning、protocol/client/server/app型検査と整形確認、固定sourceからのoverlay再生成が成功した。patcherも20 test成功・実機opt-in test 1件skip、型検査・整形確認が成功している。元と同じrenderer hash、25 ASAR entry、1 renderer resourceを維持する。ADR 0014をAcceptedとしてADR 0013を部分改訂し、目次を再生成した。`adrs doctor`は0 error、既存ADR 0001のwarning/infoのみ。
+対象testは482件（356件＋app 126件）成功。今回変更した5 source fileのlintは0 error・0 warning、protocol/client/server/app型検査と整形確認、固定sourceからのoverlay再生成が成功した。patcherも20 test成功・実機opt-in test 1件skip、型検査・整形確認が成功している。ローカル時刻対応ではrendererと通信validatorを再生成し、26 ASAR entryと1 renderer resourceを含める。ADR 0014をAcceptedとしてADR 0013を部分改訂し、目次を再生成した。`adrs doctor`は0 error、既存ADR 0001のwarning/infoのみ。
+
+ローカル時刻への変更では、UTC・日本時間・30分単位の時差・夏時間の有無を含む5 testを追加した。日本時間で`2026-10-02 00:59 +09:00`となることを確認し、対象testは計487件成功した。日時はUTCのISO文字列と`valueFormat: "datetime"`をprotocolで転送し、表示端末の`Intl.DateTimeFormat`で整形する。新しいfieldを検証する生成済み通信validatorもoverlayへ追加した。
 
 アプリへの反映は、起動中の関連processをパッチャーが検出したため停止した。関連アプリの終了後に再実行し、画面を確認する必要がある。現在のmanifestは新しい生成物を表し、インストール済みアプリは更新待ちである。
 
