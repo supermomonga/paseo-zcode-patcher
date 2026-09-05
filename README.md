@@ -25,6 +25,8 @@ node dist/src/cli.js patch
 
 固定対象では、生成 ASAR とrenderer resourceのhash、strict 署名、3 回の独立した cold start、ZCode の 4 model、既存 `PlanCard`、GLM Agentと同じZ.ai iconの表示まで実機確認済みです。結果は [実装状況](docs/implementation-status.md) を参照してください。
 
+現在のPlan承認後のモード同期修正はリポジトリ内のみの更新です。この修正のインストール済みアプリへの反映と実画面確認は未実施です。
+
 ## 開発と検証
 
 ```console

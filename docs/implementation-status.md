@@ -4,7 +4,7 @@
 
 ## 現在の状態
 
-Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、検証済み overlay を実装している。子ツールの入力省略による履歴同期失敗を修正し、`/Applications/PaseoZCode.app`へ適用済み。元の会話の最終回答表示と同期エラーの解消を実画面で確認した。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
+Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、overlay を実装している。現在の修正はPlan承認後のモード同期で、リポジトリ内のみを更新する。インストール済み`/Applications/PaseoZCode.app`への反映と、この修正の実画面確認は行っていない。下記の実機・署名・UIの証拠は修正前の成果物に対する結果である。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
 
 | Area | Status | 証拠 |
 | --- | --- | --- |
@@ -16,9 +16,9 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | Host bridge | complete | method allowlist、schema、request 相関、上限、timeout、終了処理を実装 |
 | Provider/session mapper | complete | catalog、stream、履歴、permission、question、plan、todo、cancel を実装 |
 | Overlay/manifest | complete | ASAR 18 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
-| Provider runtime evidence | complete | 実機 host で catalog、prompt、resume/history、Plan の Dismiss/Approve を確認 |
-| macOS app/signing | complete | `/Applications/PaseoZCode.app` を生成し、strict 署名、3 回の独立 cold start、正常停止を確認 |
-| UI integration | complete | ZCodeが「利用可能・4つのモデル」と表示され、PlanCardとmodel picker/composerのZ.ai iconを実画面で確認 |
+| Provider runtime evidence | previous artifact verified | 修正前の実機 host で catalog、prompt、resume/history、Plan の Dismiss/Approve を確認 |
+| macOS app/signing | previous artifact verified | 修正前の`/Applications/PaseoZCode.app`でstrict署名、3回の独立cold start、正常停止を確認 |
+| UI integration | previous artifact verified | 修正前のPlanCard、model picker/composerのZ.ai iconを実画面で確認。今回のモード同期は未確認 |
 
 ## 固定された成果物
 
@@ -28,8 +28,8 @@ Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対す�
 | ASAR overlay entry 数 | 18 |
 | renderer resource entry 数 | 1 |
 | renderer resource SHA-256 | `067e03e488a5fcee5657f21da99e301c9eb31e5e6f0687481cd776c623690f77` |
-| overlay SHA-256 | `c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03` |
-| 生成後 `app.asar` SHA-256 | `48ebc26679c0af07ba68f94b1a573f58475af5abfcf9f545f60d6001b1a38f78` |
+| overlay SHA-256 | `ab094a40bdf4c8e10c22fef7bc7a14bc3fe6565b6d943845741f79f762c08bcb` |
+| 生成後 `app.asar` SHA-256 | `7e010be089601e36daa37717ddd91baf74fc524a448a932b70b0c43c257debd2` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -94,6 +94,16 @@ icon対応済み`/Applications/PaseoZCode.app`を生成し、model pickerのZCod
 固定ソースからのoverlay buildは関連100 testとprotocol/serverの型検査に成功した。生成したoverlayへ実機採取済みの通知35件を再投入し、初期snapshotを除く各通知後の履歴応答34回がすべてvalidatorを通り、親の最終回答と正常終了が保持されることを確認した。patcherは20 test成功、runtime opt-in testは通常実行で1件skip。今回変更したファイルに対するupstream lintは修正前後とも同じ既存10 errorで、新規errorはない。
 
 ユーザーの許可により起動中の旧`zcode-acp`を終了し、修正版アプリを生成・署名した。インストール済みASARとmanifestのhash一致、元Paseo ASAR不変を確認した。元の会話を修正版アプリで開き、Exploreの結果を含む最終回答が表示され、履歴同期エラーが出ないことを確認した。元の会話へのプロンプト再送は行っていない。
+
+### Plan承認後のモード同期修正
+
+ZCodeの`state.updated`を無視していたため、承認後にnative modeが変わってもproviderの現在値とPaseoの表示に反映されなかった。また、snapshot更新時にも`mode_changed`を通知していなかった。対象sessionの`patch.mode.current`とsnapshotを共通の更新処理へ渡し、実際に値が変わったときだけ通知するよう修正した。遷移先の決定は公式ランタイムの`prePlanMode ?? "build"`に従う。
+
+修正前に遅延通知・重複通知の回帰test 3件が失敗することを確認した。修正後はsession test 25件、固定sourceからの関連test 115件とprotocol/serverの型検査が成功した。両plan sourceからの承認、`build` / `edit` / `yolo`への遅延した変更、snapshotとの重複、実行中のPlanへの移行、Dismiss、不正な通知と別session/workspaceを検証している。
+
+固定sourceからprotocol/serverのbuild、renderer export、overlayの再生成が成功した。同じoverlayから2回生成したASARのhash一致を確認し、manifest、artifact test、文書のhashを更新した。patcherは20 test成功、実機runtimeのopt-in testは1件skip。patcherの型検査、build、format確認と`git diff --check`も成功した。
+
+今回の反映範囲はリポジトリ内のみであり、インストール済みアプリは変更していない。この修正の実機・実画面確認は未実施である。
 
 ## 配布上の制約
 

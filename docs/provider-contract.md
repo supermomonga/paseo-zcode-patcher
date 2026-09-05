@@ -76,7 +76,11 @@ ZCode 3.11.2はworkspace stateでは`thoughtLevel.current`を返さず、`defaul
 
 ### Mode
 
-`getAvailableModes`は4つの固定modeを返し、`getCurrentMode`はsnapshotの現在値を返す。`setMode`はnative `setMode`を呼び、返却snapshotで変更を再確認して`mode_changed`を通知する。
+`getAvailableModes`は4つの固定modeを返し、`getCurrentMode`はsnapshotの現在値を返す。`setMode`はnative `setMode`を呼び、返却snapshotで変更を再確認する。snapshot、手動変更の応答、対象sessionの`state.updated.patch.mode.current`に共通の更新処理を使い、モードが変わったときだけ`mode_changed`を通知する。同じ値の再通知ではイベントを重複させない。
+
+`state.updated`は通知形式と対象sessionを検証し、workspaceが指定されていれば要求したworkspaceとの一致も確認する。session以外のscopeとmodeを含まないpatchはsessionのmodeを変更しない。不正なmodeや別sessionの通知はprotocol errorとして扱う。
+
+Plan承認後の遷移先はZCodeが決める。ZCode 3.11.2の`exitPlanMode`は`prePlanMode ?? "build"`を選び、Planに入る前のmodeが記憶されていればそこへ戻る。記憶がなければ`build`（Ask Before Changes）になる。起動時にPlanを指定しても、native session作成後に別modeから変更した場合はそのmodeが記憶される。providerは承認後のnative通知を反映し、追加の`setMode`や合成promptで遷移先を上書きしない。
 
 ## 4. `AgentSession` mapping
 

@@ -67,7 +67,7 @@ marker pathは`paseo-zcode-patcher.json`とし、次を含める。
   "paseoVersion": "0.7.2",
   "paseoSourceCommit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
   "originalAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-  "overlaySha256": "c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03",
+  "overlaySha256": "ab094a40bdf4c8e10c22fef7bc7a14bc3fe6565b6d943845741f79f762c08bcb",
   "zcodeArtifact": "zcode-host-3.11.2",
   "zcodeProtocol": "zcode-task-v1",
   "zcodeAcpReferenceCommit": "7b3af187d7ee732e9043aed873a863fc855625c2",

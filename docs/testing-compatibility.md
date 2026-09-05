@@ -61,6 +61,8 @@
 - model refの可逆ID、重複/unknown ID拒否
 - thinking optionのcurrent/available/set
 - modeのcurrent/available/setと未知mode拒否
+- sessionの`state.updated.patch.mode.current`とsnapshotからのmode同期、手動変更の応答と通知が重なった場合の重複抑止
+- modeを含まないpatchとsession以外のscopeでmodeを変更しないこと。不正な通知、別session/workspace、未知modeでturnを失敗させること
 - model provider未設定時のactionable diagnostic
 - slash commandsとMCP server mapping
 
@@ -87,6 +89,8 @@
 - `kind: "plan"`、`input.plan`、`metadata.planText`、action mapping
 - Approve/Dismissがoriginal requestへexactly onceで戻る
 - response後に合成follow-up promptを送らない
+- Approveの応答後もnative mode通知まではPlanを維持し、遅れて届く`build` / `edit` / `yolo`への変更を反映すること。承認処理から`setMode`を送らないこと
+- Dismissではmodeを変更しないこと。実行中のPlanへの移行も反映すること
 - planとtodoを別eventとして同時に保持できる
 - todo空配列で古い表示を消す
 
@@ -134,7 +138,7 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 3. `PlanCard`としてMarkdown全体が表示されることを確認する。
 4. todoが存在する場合、別の`TodoListCard`として表示されることを確認する。
 5. Dismissし、workspaceが変更されずnative deny/declineが返ることを確認する。
-6. 再度planを作成してApproveし、同じnative turnが実装へ進むことを確認する。
+6. 再度planを作成してApproveし、同じnative turnが実装へ進み、Paseoのmode表示がZCodeの現在値と一致することを確認する。遷移先はZCodeが保持する`prePlanMode`、記憶がなければ`build`である。
 7. `permission-plan-card` test IDが使用され、interaction表示のrenderer差分がないことを確認する。
 
 ## 6. Negative runtime tests
@@ -168,6 +172,10 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 - 修正版アプリでThinkingの既定値`Max`、選択肢`Low` / `High` / `Max`を確認。`High`を指定して開始したsessionが正常応答し、composerでも`High`を保持することを確認。
 - icon修正版アプリのmodel pickerでZCode providerと4 modelにGLM Agentと同じZ.ai iconが表示され、ZCode model選択後のcomposerにも同じiconが表示されることを確認。
 - `npm pack --dry-run`でmanifestが参照するASAR 18 entryとrenderer resource 1 entryがpackageへ含まれることを確認。
+
+### Plan承認後のモード同期修正
+
+関連115 testとprotocol/serverの型検査・build、renderer export、overlay再生成が成功した。patcherは20 test成功、実機runtimeのopt-in testは1件skip。型検査、build、format確認、生成ASARの決定性とartifact hash検証も成功した。インストール済みアプリへの反映と実画面確認は未実施であり、上記の実機結果は修正前の成果物に対するもの。詳細は[実装状況](implementation-status.md)を参照する。
 
 ## 8. Release判定
 

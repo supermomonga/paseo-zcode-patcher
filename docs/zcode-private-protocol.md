@@ -145,6 +145,8 @@ session.event
 
 未知typeを無視または正常終了へ丸めない。no-op扱いにするeventも、現在の検証済み一覧へ明示的に含める。
 
+`state.updated.notification`は`type: "state.updated"`、`scope: "server" | "workspace" | "session"`、non-negative `revision`、objectの`patch`と、任意の`workspace`、`sessionId`、`reason`を持つ。session scopeでは対象`sessionId`が必須である。mode変更は`patch.mode.current`に入り、`patch.status`だけの通知もある。providerはmodeを含むsession通知を検証して現在値とPaseoの表示を同期する。snapshotの再送を待たない。
+
 ## 8. Reverse interaction
 
 ### Permission

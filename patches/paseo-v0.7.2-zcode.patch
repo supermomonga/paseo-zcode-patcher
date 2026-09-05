@@ -119,10 +119,10 @@ index c65db34b2d7327581055b38fa8b8166f7fdc6a14..859fa81e56733160862b57d273fcbe3d
  };
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.test.ts b/packages/server/src/server/agent/providers/zcode/agent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167acbb355ae9
+index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc99e924e85
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.test.ts
-@@ -0,0 +1,743 @@
+@@ -0,0 +1,1038 @@
 +import { mkdtemp, rm } from "node:fs/promises";
 +import { tmpdir } from "node:os";
 +import { join } from "node:path";
@@ -184,6 +184,8 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +
 +  constructor(private current: SessionSnapshot) {}
 +
++  emitModeOnSet = false;
++
 +  async request<Schema extends z.ZodType>(
 +    method: string,
 +    params: unknown,
@@ -213,6 +215,9 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +        },
 +      };
 +      result = this.current;
++      if (this.emitModeOnSet) {
++        await this.emit(stateUpdate({ mode: { current: value.mode } }));
++      }
 +    } else if (method === "setModel" || method === "setThoughtLevel") {
 +      result = this.current;
 +    }
@@ -265,6 +270,280 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +  });
 +  return { workspace, bridge, session, initial };
 +}
++
++function stateUpdate(patch: unknown): DynamicEvent {
++  return {
++    type: "state.updated",
++    notification: {
++      type: "state.updated",
++      scope: "session",
++      sessionId: "session-1",
++      revision: 1,
++      patch,
++    },
++  };
++}
++
++async function completeTurn(bridge: FakeBridge, seq = 1): Promise<void> {
++  await bridge.emit({
++    type: "session.event",
++    event: {
++      eventId: `mode-test-completed-${seq}`,
++      sessionId: "session-1",
++      seq,
++      timestamp: 2,
++      deliveryKind: "desktop-continuous",
++      type: "turn.completed",
++      payload: { resultType: "success" },
++    },
++  });
++}
++
++async function requestPlan(
++  bridge: FakeBridge,
++  source: "permission" | "question"
++) {
++  if (source === "permission") {
++    await bridge.emit({
++      type: "permission.request",
++      request: {
++        requestId: "mode-plan",
++        sessionId: "session-1",
++        toolCallId: "exit-plan",
++        toolName: "ExitPlanMode",
++        reason: "Review plan",
++        riskLevel: "medium",
++        input: { plan: "# Plan" },
++        options: [
++          {
++            optionId: "approve",
++            kind: "allow_once",
++            name: "Approve",
++            response: { decision: "allow" },
++          },
++          {
++            optionId: "dismiss",
++            kind: "deny_once",
++            name: "Dismiss",
++            response: { decision: "deny" },
++          },
++        ],
++      },
++    });
++  } else {
++    await bridge.emit({
++      type: "userInput.request",
++      request: {
++        requestId: "mode-plan",
++        sessionId: "session-1",
++        input: { plan: "# Plan" },
++        schema: { interaction: "plan_approval" },
++        questions: [
++          {
++            question: "Review plan",
++            header: "Plan",
++            options: [{ value: "approve", label: "Approve" }],
++          },
++        ],
++      },
++    });
++  }
++}
++
++describe("ZCode mode synchronization", () => {
++  it.each(["permission", "question"] as const)(
++    "follows delayed native mode changes after %s plan approval",
++    async (source) => {
++      const { bridge, session, initial } = await fixture();
++      const events: AgentStreamEvent[] = [];
++      session.subscribe((event) => events.push(event));
++      const modes = () =>
++        events.filter((event) => event.type === "mode_changed");
++
++      let seq = 0;
++      for (const target of ["build", "edit", "yolo"]) {
++        if ((await session.getCurrentMode()) !== "plan")
++          await session.setMode("plan");
++        events.length = 0;
++        bridge.calls.length = 0;
++        const run = session.run("Plan and implement");
++        await vi.waitFor(() =>
++          expect(
++            bridge.calls.some((call) => call.method === "sendPrompt")
++          ).toBe(true)
++        );
++        await requestPlan(bridge, source);
++        const pending = session.getPendingPermissions()[0]!;
++        await session.respondToPermission(pending.id, {
++          behavior: "allow",
++          selectedActionId: "approve",
++        });
++        expect(await session.getCurrentMode()).toBe("plan");
++        expect(modes()).toEqual([]);
++        expect(
++          bridge.calls.filter((call) => call.method === "setMode")
++        ).toEqual([]);
++        expect(
++          bridge.calls.filter((call) => call.method === "sendPrompt")
++        ).toHaveLength(1);
++        expect(
++          bridge.calls.filter((call) => call.method.startsWith("respond"))
++        ).toHaveLength(1);
++
++        await bridge.emit(stateUpdate({ mode: { current: target } }));
++        expect(await session.getCurrentMode()).toBe(target);
++        expect(await session.getRuntimeInfo()).toMatchObject({
++          modeId: target,
++        });
++        expect(modes()).toEqual([
++          expect.objectContaining({ currentModeId: target, provider: "zcode" }),
++        ]);
++        await bridge.emit(stateUpdate({ mode: { current: target } }));
++        await bridge.emit({
++          type: "snapshot",
++          snapshot: {
++            ...initial,
++            settings: { ...initial.settings, mode: { current: target } },
++          },
++        });
++        expect(modes()).toHaveLength(1);
++        await completeTurn(bridge, ++seq);
++        await expect(run).resolves.toMatchObject({ sessionId: "session-1" });
++        expect(events.some((event) => event.type === "turn_completed")).toBe(
++          true
++        );
++        expect(events.some((event) => event.type === "turn_failed")).toBe(
++          false
++        );
++      }
++    }
++  );
++
++  it.each(["permission", "question"] as const)(
++    "does not change mode when a %s plan is dismissed",
++    async (source) => {
++      const { bridge, session } = await fixture();
++      const events: AgentStreamEvent[] = [];
++      session.subscribe((event) => events.push(event));
++      await session.startTurn("Plan");
++      await requestPlan(bridge, source);
++      const pending = session.getPendingPermissions()[0]!;
++      await session.respondToPermission(pending.id, {
++        behavior: "deny",
++        selectedActionId:
++          source === "permission" ? "dismiss" : "zcode-plan-dismiss:mode-plan",
++      });
++      expect(await session.getCurrentMode()).toBe("plan");
++      expect(events.filter((event) => event.type === "mode_changed")).toEqual(
++        []
++      );
++      expect(bridge.calls.filter((call) => call.method === "setMode")).toEqual(
++        []
++      );
++      await completeTurn(bridge);
++    }
++  );
++
++  it("notifies snapshot changes and entry into plan during a turn, without duplicate manual-mode events", async () => {
++    const { bridge, session, initial } = await fixture();
++    const events: AgentStreamEvent[] = [];
++    session.subscribe((event) => events.push(event));
++    const modes = () =>
++      events
++        .filter((event) => event.type === "mode_changed")
++        .map((event) => event.currentModeId);
++    bridge.emitModeOnSet = true;
++    await session.setMode("edit");
++    await session.setMode("edit");
++    expect(modes()).toEqual(["edit"]);
++    await session.startTurn("Work");
++    await bridge.emit({ type: "snapshot", snapshot: initial });
++    await bridge.emit(stateUpdate({ mode: { current: "plan" } }));
++    expect(modes()).toEqual(["edit", "plan"]);
++    expect(await session.getCurrentMode()).toBe("plan");
++    await completeTurn(bridge);
++  });
++
++  it("ignores mode-free session updates and non-session settings", async () => {
++    const { bridge, session } = await fixture();
++    const events: AgentStreamEvent[] = [];
++    session.subscribe((event) => events.push(event));
++    await bridge.emit(stateUpdate({ status: "running" }));
++    for (const scope of ["workspace", "server"]) {
++      await bridge.emit({
++        type: "state.updated",
++        notification: {
++          type: "state.updated",
++          scope,
++          revision: 1,
++          patch: { mode: { current: "yolo" } },
++        },
++      });
++    }
++    expect(await session.getCurrentMode()).toBe("plan");
++    expect(events.filter((event) => event.type === "mode_changed")).toEqual([]);
++  });
++
++  it.each([
++    { name: "unknown mode", patch: { mode: { current: "future" } } },
++    { name: "malformed mode", patch: { mode: { current: 1 } } },
++    { name: "missing current", patch: { mode: {} } },
++    { name: "null mode", patch: { mode: null } },
++    { name: "malformed patch", patch: null },
++    {
++      name: "another session",
++      patch: { mode: { current: "edit" } },
++      sessionId: "other-session",
++    },
++    {
++      name: "missing session",
++      patch: { mode: { current: "edit" } },
++      sessionId: undefined,
++    },
++    {
++      name: "invalid revision",
++      patch: { mode: { current: "edit" } },
++      revision: -1,
++    },
++    {
++      name: "another workspace",
++      patch: { mode: { current: "edit" } },
++      workspace: { workspacePath: "/other-workspace" },
++    },
++  ])(
++    "fails the turn on $name without publishing a mode",
++    async ({ name: _name, ...notification }) => {
++      const { bridge, session } = await fixture();
++      const events: AgentStreamEvent[] = [];
++      session.subscribe((event) => events.push(event));
++      const run = session.run("Work");
++      const failure = expect(run).rejects.toThrow();
++      await vi.waitFor(() =>
++        expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
++          true
++        )
++      );
++      await bridge.emit({
++        type: "state.updated",
++        notification: {
++          type: "state.updated",
++          scope: "session",
++          sessionId: "session-1",
++          revision: 1,
++          ...notification,
++        },
++      });
++      await failure;
++      expect(await session.getCurrentMode()).toBe("plan");
++      expect(events.filter((event) => event.type === "mode_changed")).toEqual(
++        []
++      );
++      expect(
++        bridge.calls.filter((call) => call.method === "cancelGeneration")
++      ).toHaveLength(1);
++    }
++  );
++});
 +
 +afterEach(async () => {
 +  await Promise.all(
@@ -486,7 +765,11 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +              reset: false,
 +              staleCursor: false,
 +              gap: false,
-+              window: { minSeq: 1, maxSeq: entries.length, nextSeq: entries.length + 1 },
++              window: {
++                minSeq: 1,
++                maxSeq: entries.length,
++                nextSeq: entries.length + 1,
++              },
 +              startCursor: { epoch: "epoch", seq: 1 },
 +              endCursor: { epoch: "epoch", seq: entries.length },
 +              hasOlder: false,
@@ -496,7 +779,10 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +            },
 +          },
 +        };
-+        expect(validateWSOutboundMessage(JSON.parse(JSON.stringify(response))).success).toBe(true);
++        expect(
++          validateWSOutboundMessage(JSON.parse(JSON.stringify(response)))
++            .success
++        ).toBe(true);
 +      };
 +      const parentInput = {
 +        description: "Read marker",
@@ -523,8 +809,15 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +      };
 +      await emit("tool.updated", { ...child, kind: "started", startedAt: 2 });
 +      await assertHistory();
-+      const output = { success: terminalKind === "result", content: "Read outcome" };
-+      await emit("tool.updated", { ...child, kind: terminalKind, [terminalKind]: output });
++      const output = {
++        success: terminalKind === "result",
++        content: "Read outcome",
++      };
++      await emit("tool.updated", {
++        ...child,
++        kind: terminalKind,
++        [terminalKind]: output,
++      });
 +      await assertHistory();
 +      await emit("tool.updated", {
 +        kind: "result",
@@ -540,7 +833,9 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +      await emit("turn.completed", { resultType: "success" });
 +      await assertHistory();
 +      const tools = events.flatMap((event) =>
-+        event.type === "timeline" && event.item.type === "tool_call" ? [event.item] : [],
++        event.type === "timeline" && event.item.type === "tool_call"
++          ? [event.item]
++          : []
 +      );
 +      expect(tools.map((item) => item.detail)).toEqual([
 +        { type: "unknown", input: parentInput, output: null },
@@ -554,7 +849,7 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +      });
 +      expect(events.at(-1)).toMatchObject({ type: "turn_completed" });
 +      await session.close();
-+    },
++    }
 +  );
 +
 +  it("rejects a second prompt instead of queueing it", async () => {
@@ -868,10 +1163,10 @@ index 0000000000000000000000000000000000000000..52d6a75b10849b249dd2f319c55167ac
 +});
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.ts b/packages/server/src/server/agent/providers/zcode/agent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..68b031b7c628472d682849d943f06caa88e6cd2f
+index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd76b4192a0
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.ts
-@@ -0,0 +1,1756 @@
+@@ -0,0 +1,1792 @@
 +import { randomUUID } from "node:crypto";
 +import { homedir } from "node:os";
 +import { isAbsolute } from "node:path";
@@ -943,7 +1238,9 @@ index 0000000000000000000000000000000000000000..68b031b7c628472d682849d943f06caa
 +  InitializeResultSchema,
 +  SessionListSchema,
 +  SessionSettingsSchema,
++  SessionModePatchSchema,
 +  SessionSnapshotSchema,
++  StateUpdatedNotificationSchema,
 +  SendPromptResultSchema,
 +  TokenUsageSchema,
 +  UnknownResultSchema,
@@ -1497,12 +1794,6 @@ index 0000000000000000000000000000000000000000..68b031b7c628472d682849d943f06caa
 +        "ZCode did not apply the requested mode"
 +      );
 +    }
-+    this.emit({
-+      type: "mode_changed",
-+      provider: this.provider,
-+      currentModeId: modeId,
-+      availableModes: ZCODE_MODES.map((mode) => ({ ...mode })),
-+    });
 +  }
 +
 +  getPendingPermissions(): AgentPermissionRequest[] {
@@ -1826,11 +2117,36 @@ index 0000000000000000000000000000000000000000..68b031b7c628472d682849d943f06caa
 +        this.publishTodos(dynamic.snapshot);
 +        return;
 +      }
-+      if (
-+        dynamic.type === "state.updated" ||
-+        dynamic.type === "userInput.response"
-+      )
++      if (dynamic.type === "state.updated") {
++        const notification = StateUpdatedNotificationSchema.parse(
++          dynamic.notification
++        );
++        if (notification.scope !== "session") return;
++        if (notification.sessionId !== this.id) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "ZCode state update belongs to another session"
++          );
++        }
++        if (
++          notification.workspace !== undefined &&
++          notification.workspace.workspacePath !== this.workspace
++        ) {
++          throw new AdapterError(
++            "NATIVE_PROTOCOL_ERROR",
++            "ZCode state update belongs to another workspace"
++          );
++        }
++        const patch = SessionModePatchSchema.parse(notification.patch);
++        if (patch.mode !== undefined) {
++          this.updateSnapshot({
++            ...this.snapshot,
++            settings: { ...this.snapshot.settings, mode: patch.mode },
++          });
++        }
 +        return;
++      }
++      if (dynamic.type === "userInput.response") return;
 +      if (dynamic.type === "providerRuntimeHeaders.request") {
 +        await this.bridge.request(
 +          "respondProviderRuntimeHeaders",
@@ -2510,8 +2826,23 @@ index 0000000000000000000000000000000000000000..68b031b7c628472d682849d943f06caa
 +
 +  private updateSnapshot(snapshot: SessionSnapshot): void {
 +    assertSnapshotWorkspace(snapshot, this.workspace);
-+    requireMode(snapshot.settings.mode.current);
++    if (snapshot.session.sessionId !== this.id) {
++      throw new AdapterError(
++        "NATIVE_PROTOCOL_ERROR",
++        "ZCode snapshot belongs to another session"
++      );
++    }
++    const modeId = requireMode(snapshot.settings.mode.current);
++    const previousModeId = this.snapshot.settings.mode.current;
 +    this.snapshot = snapshot;
++    if (modeId !== previousModeId) {
++      this.emit({
++        type: "mode_changed",
++        provider: this.provider,
++        currentModeId: modeId,
++        availableModes: ZCODE_MODES.map((mode) => ({ ...mode })),
++      });
++    }
 +  }
 +
 +  private pushTimeline(active: ActiveTurn, item: AgentTimelineItem): void {
@@ -5999,10 +6330,10 @@ index 0000000000000000000000000000000000000000..6defb149fd30e637c7fd27b6be0a117e
 +}
 diff --git a/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts b/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f2b7aee55
+index 0000000000000000000000000000000000000000..442056af5f2aec420da2dd1d4ef810c54c35362c
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,322 @@
 +import { z } from "zod";
 +
 +const RecordSchema = z.record(z.string(), z.unknown());
@@ -6073,6 +6404,25 @@ index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f
 +  })
 +  .passthrough();
 +
++export const StateUpdatedNotificationSchema = z
++  .object({
++    type: z.literal("state.updated"),
++    scope: z.enum(["server", "workspace", "session"]),
++    workspace: z
++      .object({ workspacePath: z.string().min(1) })
++      .passthrough()
++      .optional(),
++    sessionId: z.string().min(1).optional(),
++    revision: z.number().int().nonnegative(),
++    reason: z.string().optional(),
++    patch: RecordSchema,
++  })
++  .strict();
++
++export const SessionModePatchSchema = SessionSettingsSchema.pick({ mode: true })
++  .partial()
++  .passthrough();
++
 +export const SessionSnapshotSchema = z
 +  .object({
 +    session: z
@@ -6096,7 +6446,7 @@ index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f
 +            .passthrough(),
 +          parts: z.array(z.object({ type: z.string().min(1) }).passthrough()),
 +        })
-+        .passthrough(),
++        .passthrough()
 +    ),
 +    runtime: z
 +      .object({
@@ -6124,7 +6474,7 @@ index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f
 +            status: z.enum(["pending", "in_progress", "completed"]),
 +            priority: z.enum(["high", "medium", "low"]),
 +          })
-+          .strict(),
++          .strict()
 +      )
 +      .optional(),
 +    slashCommands: z.array(
@@ -6134,7 +6484,7 @@ index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f
 +          description: z.string(),
 +          inputHint: z.string().optional(),
 +        })
-+        .passthrough(),
++        .passthrough()
 +    ),
 +  })
 +  .passthrough();
@@ -6147,7 +6497,7 @@ index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f
 +      title: z.string().optional(),
 +      updatedAt: z.number().optional(),
 +    })
-+    .passthrough(),
++    .passthrough()
 +);
 +
 +export const SendPromptResultSchema = z
@@ -6215,7 +6565,7 @@ index 0000000000000000000000000000000000000000..ce2a3e0f48449708e560b520fe32343f
 +          description: z.string().optional(),
 +          preview: z.string().optional(),
 +        })
-+        .strict(),
++        .strict()
 +    ),
 +    multiSelect: z.boolean().optional(),
 +  })

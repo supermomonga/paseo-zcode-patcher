@@ -21,7 +21,7 @@ describe("release artifact", () => {
       sourceAsarSha256:
         "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
       patchedAsarSha256:
-        "48ebc26679c0af07ba68f94b1a573f58475af5abfcf9f545f60d6001b1a38f78",
+        "7e010be089601e36daa37717ddd91baf74fc524a448a932b70b0c43c257debd2",
     });
     expect(manifest.zcode).toMatchObject({
       appVersion: "3.11.2",
@@ -32,7 +32,7 @@ describe("release artifact", () => {
     });
     expect(manifest.entries).toHaveLength(18);
     expect(manifest.overlayHash).toBe(
-      "c8bcb816905f5416299919a8f04ab37fd07888d8476ce16b38c236678886aa03",
+      "ab094a40bdf4c8e10c22fef7bc7a14bc3fe6565b6d943845741f79f762c08bcb",
     );
     expect(
       manifest.entries.some((entry) =>
