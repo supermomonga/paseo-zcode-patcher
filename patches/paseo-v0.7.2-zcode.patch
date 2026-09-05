@@ -18,6 +18,221 @@ index 02cd2ec87446b336450a1abc675ee4a17ff6a617..8a1c7677d47a988220663b4c1c3869fc
 +  if (provider === "zcode") {
 +    return { kind: "catalog", id: "glm-acp-agent" };
 +  }
+diff --git a/packages/app/src/composer/draft/workspace-tab.tsx b/packages/app/src/composer/draft/workspace-tab.tsx
+index 167a8886b821b3561b2dccf6c02f80e188043571..fc1c4ddd60983c6f8cc2b7e06f54e328b25addaa 100644
+--- a/packages/app/src/composer/draft/workspace-tab.tsx
++++ b/packages/app/src/composer/draft/workspace-tab.tsx
+@@ -71,0 +72 @@ interface AutoSubmitConfig {
++  planReturnMode?: string;
+@@ -80,0 +82 @@ function resolveAutoSubmitConfig(
++    planReturnMode?: string;
+@@ -89,0 +92 @@ function resolveAutoSubmitConfig(
++    planReturnMode: pending.planReturnMode,
+@@ -152,0 +156 @@ async function submitDraftCreateRequest(input: {
++    planReturnMode?: string;
+@@ -192,0 +197,3 @@ async function submitDraftCreateRequest(input: {
++    planReturnMode: autoSubmitConfig
++      ? autoSubmitConfig.planReturnMode
++      : composerState.planReturnMode,
+@@ -286,0 +294 @@ function buildDraftInitialValues(input: {
++    planReturnMode: input.initialSetup.planReturnMode,
+diff --git a/packages/app/src/hooks/use-agent-form-state.ts b/packages/app/src/hooks/use-agent-form-state.ts
+index 456ce249c25ce3ff43f91d9e8ba45cddce9fee7f..5b444565baf1f561675830f7e85eb3df60a9e671 100644
+--- a/packages/app/src/hooks/use-agent-form-state.ts
++++ b/packages/app/src/hooks/use-agent-form-state.ts
+@@ -59,0 +60 @@ export interface UseAgentFormStateResult {
++  planReturnMode?: string;
+@@ -127,0 +129 @@ function buildResolutionIntentKey(initialValues: FormInitialValues | undefined):
++    resolutionIntentKeyPart(initialValues.planReturnMode),
+@@ -637,0 +640 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
++      planReturnMode: formState.planReturnMode,
+diff --git a/packages/app/src/provider-selection/resolve-agent-form.test.ts b/packages/app/src/provider-selection/resolve-agent-form.test.ts
+index 5b6cc2a5099cbcb4d7e7177a55ac5053bb7c5b17..5c00478d04401747f77e52327c220e6c6f9155c3 100644
+--- a/packages/app/src/provider-selection/resolve-agent-form.test.ts
++++ b/packages/app/src/provider-selection/resolve-agent-form.test.ts
+@@ -1278,0 +1279,68 @@ describe("resolveAgentForm", () => {
++
++describe("ZCode draft Plan return mode", () => {
++  it.each(["build", "edit", "yolo"])("retains %s before the first message", (modeId) => {
++    let state = makeState({ provider: "zcode", modeId });
++    state = resolveAgentForm(state, { type: "SET_MODE_FROM_USER", modeId: "plan" });
++    expect(state.form.planReturnMode).toBe(modeId);
++    state = resolveAgentForm(state, { type: "SET_MODE_FROM_USER", modeId: "plan" });
++    expect(state.form.planReturnMode).toBe(modeId);
++    state = resolveAgentForm(state, { type: "SET_MODE_FROM_USER", modeId: "edit" });
++    expect(state.form.planReturnMode).toBeUndefined();
++    state = resolveAgentForm(state, { type: "SET_MODE_FROM_USER", modeId: "plan" });
++    expect(state.form.planReturnMode).toBe("edit");
++  });
++
++  it("does not invent a previous selection for an initially Plan draft", () => {
++    const state = resolveAgentForm(makeState({ provider: "zcode", modeId: "plan" }), {
++      type: "SET_MODE_FROM_USER",
++      modeId: "plan",
++    });
++    expect(state.form.planReturnMode).toBeUndefined();
++  });
++
++  it("does not carry a return mode to another host or provider", () => {
++    const state = resolveAgentForm(makeState({ provider: "zcode", modeId: "yolo" }), {
++      type: "SET_MODE_FROM_USER",
++      modeId: "plan",
++    });
++    expect(
++      resolveAgentForm(state, { type: "SET_SERVER_ID_FROM_USER", value: "other" }).form
++        .planReturnMode,
++    ).toBeUndefined();
++    expect(
++      resolveAgentForm(state, { type: "CLEAR_PROVIDER_SELECTION_FROM_USER" }).form.planReturnMode,
++    ).toBeUndefined();
++    expect(
++      resolveAgentForm(makeState({ provider: "claude", modeId: "edit" }), {
++        type: "SET_MODE_FROM_USER",
++        modeId: "plan",
++      }).form.planReturnMode,
++    ).toBeUndefined();
++  });
++
++  it("carries the draft return mode through new-workspace form resolution", () => {
++    const definition = {
++      ...TEST_CLAUDE_DEFINITION,
++      id: "zcode",
++      defaultModeId: "build",
++      modes: ["build", "edit", "plan", "yolo"].map((id) => ({
++        id,
++        label: id,
++        icon: "ShieldCheck" as const,
++        colorTier: "safe" as const,
++      })),
++    };
++    const state = resolveAgentForm(makeState(), {
++      type: "COMPLETE_RESOLUTION",
++      initialValues: { provider: "zcode", modeId: "plan", planReturnMode: "yolo" },
++      preferences: null,
++      providerModelsByProvider: new Map([["zcode", []]]),
++      allowedProviderMap: makeProviderMap(definition),
++    });
++    expect(state.form).toMatchObject({
++      provider: "zcode",
++      modeId: "plan",
++      planReturnMode: "yolo",
++    });
++  });
++});
+diff --git a/packages/app/src/provider-selection/resolve-agent-form.ts b/packages/app/src/provider-selection/resolve-agent-form.ts
+index 9fa187200e6bdc0f2e0b0f5217628512d51aabe0..b35ae850e2ebb3f57037f3f47478a0edef06ada6 100644
+--- a/packages/app/src/provider-selection/resolve-agent-form.ts
++++ b/packages/app/src/provider-selection/resolve-agent-form.ts
+@@ -17,0 +18 @@ export interface FormInitialValues {
++  planReturnMode?: string;
+@@ -26,0 +28 @@ export interface FormState {
++  planReturnMode?: string;
+@@ -618 +620 @@ function applyProfile(state: AgentFormReducerState, action: ApplyProfileAction)
+-export function resolveAgentForm(
++function reduceAgentForm(
+@@ -756,0 +759,26 @@ export function resolveAgentForm(
++
++// Drafts have no native session yet. Preserve a real non-plan selection so
++// ZCode can observe that transition when the session is created.
++export function resolveAgentForm(
++  state: AgentFormReducerState,
++  action: AgentFormAction,
++): AgentFormReducerState {
++  const next = reduceAgentForm(state, action);
++  const form = next.form;
++  let planReturnMode: string | undefined;
++  if (form.provider === "zcode" && form.modeId === "plan") {
++    if (action.type === "COMPLETE_RESOLUTION" && !state.userModified.modeId) {
++      planReturnMode = action.initialValues?.planReturnMode;
++    } else if (state.form.provider === form.provider && state.form.serverId === form.serverId) {
++      planReturnMode = ["build", "edit", "yolo"].includes(state.form.modeId)
++        ? state.form.modeId
++        : state.form.planReturnMode;
++    }
++  }
++  if (planReturnMode === form.planReturnMode) return next;
++  const { planReturnMode: _previous, ...rest } = form;
++  return {
++    ...next,
++    form: { ...rest, ...(planReturnMode !== undefined ? { planReturnMode } : {}) },
++  };
++}
+diff --git a/packages/app/src/screens/new-workspace-screen.tsx b/packages/app/src/screens/new-workspace-screen.tsx
+index 947190ccd033793b9c78493e0e7dbf47f0b96efd..83f8299d7fe7af411cb7d9294d686749a17b77d8 100644
+--- a/packages/app/src/screens/new-workspace-screen.tsx
++++ b/packages/app/src/screens/new-workspace-screen.tsx
+@@ -766,0 +767 @@ interface WorkspaceDraftSubmissionConfig {
++  planReturnMode?: string;
+@@ -875,0 +877 @@ function buildWorkspaceDraftSetupFromComposer(input: {
++    planReturnMode: input.composerState.planReturnMode,
+@@ -1008,0 +1011 @@ function resolveWorkspaceDraftSubmissionConfig(input: {
++      planReturnMode: initialSetup.planReturnMode,
+@@ -1018,0 +1022 @@ function resolveWorkspaceDraftSubmissionConfig(input: {
++    planReturnMode: composerState.planReturnMode,
+@@ -1075,0 +1080 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
++    ...(submission.planReturnMode ? { planReturnMode: submission.planReturnMode } : {}),
+diff --git a/packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts b/packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts
+index 0ff6fc5b731f806dc2f420101f0abd44e38a7492..9ec21f60131a0c36460f5ab52f920f37beb24701 100644
+--- a/packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts
++++ b/packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts
+@@ -22,0 +23,29 @@ describe("workspace-draft-agent-config", () => {
++
++describe("ZCode initial Plan options", () => {
++  it.each(["build", "edit", "yolo"])(
++    "forwards %s through the existing provider options",
++    (planReturnMode) => {
++      expect(
++        buildWorkspaceDraftAgentConfig({
++          provider: "zcode",
++          cwd: "/tmp/project",
++          modeId: "plan",
++          planReturnMode,
++        }),
++      ).toMatchObject({
++        modeId: "plan",
++        providerOptions: { planReturnMode },
++      });
++    },
++  );
++  it("omits return mode without a selection, outside Plan, or for another provider", () => {
++    for (const config of [
++      { provider: "zcode", modeId: "plan" },
++      { provider: "zcode", modeId: "edit", planReturnMode: "yolo" },
++      { provider: "codex", modeId: "plan", planReturnMode: "yolo" },
++    ])
++      expect(buildWorkspaceDraftAgentConfig({ cwd: "/tmp/project", ...config })).not.toHaveProperty(
++        "providerOptions",
++      );
++  });
++});
+diff --git a/packages/app/src/screens/workspace/workspace-draft-agent-config.ts b/packages/app/src/screens/workspace/workspace-draft-agent-config.ts
+index cf122ee56691ad416f3aca30efadca5896877a69..896d8a9095fada02d58bde99f903470e175212c6 100644
+--- a/packages/app/src/screens/workspace/workspace-draft-agent-config.ts
++++ b/packages/app/src/screens/workspace/workspace-draft-agent-config.ts
+@@ -6,0 +7 @@ export function buildWorkspaceDraftAgentConfig(input: {
++  planReturnMode?: string;
+@@ -14,0 +16,3 @@ export function buildWorkspaceDraftAgentConfig(input: {
++    ...(input.provider === "zcode" && input.modeId === "plan" && input.planReturnMode
++      ? { providerOptions: { planReturnMode: input.planReturnMode } }
++      : {}),
+diff --git a/packages/app/src/stores/workspace-draft-submission-store.ts b/packages/app/src/stores/workspace-draft-submission-store.ts
+index 2dbd27f2a59ecd8efd3a2cc573d5a5126812e84d..e9cc98bb2f8cab121e87b7e2036d4c27161ab6da 100644
+--- a/packages/app/src/stores/workspace-draft-submission-store.ts
++++ b/packages/app/src/stores/workspace-draft-submission-store.ts
+@@ -16,0 +17 @@ export interface PendingWorkspaceDraftSubmission {
++  planReturnMode?: string;
+diff --git a/packages/app/src/stores/workspace-layout-store.ts b/packages/app/src/stores/workspace-layout-store.ts
+index 974b8c69640172f426cd5815ac2e6c503464b2a0..903674262503260549b9700f242f06469f1abdbb 100644
+--- a/packages/app/src/stores/workspace-layout-store.ts
++++ b/packages/app/src/stores/workspace-layout-store.ts
+@@ -182,0 +183 @@ const WorkspaceDraftTabSetupStorageSchema = z.strictObject({
++  planReturnMode: z.enum(["build", "edit", "yolo"]).optional(),
+diff --git a/packages/app/src/workspace-tabs/model.ts b/packages/app/src/workspace-tabs/model.ts
+index fa0e1550602e628297b6ac415b4b12868a0e8d7b..7cd98de94e3b5c82e656812fee5a2823c1e50286 100644
+--- a/packages/app/src/workspace-tabs/model.ts
++++ b/packages/app/src/workspace-tabs/model.ts
+@@ -8,0 +9 @@ export interface WorkspaceDraftTabSetup {
++  planReturnMode?: string;
 diff --git a/packages/protocol/src/provider-config.ts b/packages/protocol/src/provider-config.ts
 index 2ab879c31ff4f3578d0050d66d8fe49b20adfb6d..65b43b277e3cabb0f41ba340b0833ca688f64e60 100644
 --- a/packages/protocol/src/provider-config.ts
@@ -90,26 +305,27 @@ index 82d097836792d0cf043ac57831465b7e4953e8a3..d7b01d532596a7d2d962fa0f40fa5758
      id: "omp",
      label: "Oh My Pi",
 diff --git a/packages/server/src/server/agent/provider-registry.ts b/packages/server/src/server/agent/provider-registry.ts
-index c65db34b2d7327581055b38fa8b8166f7fdc6a14..859fa81e56733160862b57d273fcbe3dfe4988b7 100644
+index c65db34b2d7327581055b38fa8b8166f7fdc6a14..9213b61c00ac1e418002ceb663f2484db31ebbf0 100644
 --- a/packages/server/src/server/agent/provider-registry.ts
 +++ b/packages/server/src/server/agent/provider-registry.ts
-@@ -47,6 +47,7 @@ import { OmpAgentClient } from "./providers/omp/agent.js";
+@@ -47,6 +47,8 @@ import { OmpAgentClient } from "./providers/omp/agent.js";
  import type { OmpRuntime } from "./providers/omp/runtime.js";
  import { PiRpcAgentClient } from "./providers/pi/agent.js";
  import { TraeACPAgentClient } from "./providers/trae-acp-agent.js";
 +import { ZCodeAgentClient } from "./providers/zcode/agent.js";
++import { ZCodeProviderOptionsSchema } from "./providers/zcode/options.js";
  import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
  import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
  import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
-@@ -156,6 +157,7 @@ const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
+@@ -156,6 +158,7 @@ const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
    claude: { optionsSchema: ClaudeProviderOptionsSchema, supportsExactMcpPreapproval: true },
    codex: { optionsSchema: CodexProviderOptionsSchema, supportsExactMcpPreapproval: true },
    opencode: { optionsSchema: OpenCodeProviderOptionsSchema, supportsExactMcpPreapproval: true },
-+  zcode: { optionsSchema: EmptyProviderOptionsSchema, supportsExactMcpPreapproval: false },
++  zcode: { optionsSchema: ZCodeProviderOptionsSchema, supportsExactMcpPreapproval: false },
  };
  
  const UNSUPPORTED_PROVIDER_CONTRACT: ProviderContract = {
-@@ -230,6 +232,7 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
+@@ -230,6 +233,7 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
        providerParams: options?.providerParams,
        runtime: options?.ompRuntime,
      }),
@@ -119,11 +335,11 @@ index c65db34b2d7327581055b38fa8b8166f7fdc6a14..859fa81e56733160862b57d273fcbe3d
  };
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.test.ts b/packages/server/src/server/agent/providers/zcode/agent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc99e924e85
+index 0000000000000000000000000000000000000000..b825c5568e9edbd58bc791b5309b681719aa0280
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.test.ts
-@@ -0,0 +1,1038 @@
-+import { mkdtemp, rm } from "node:fs/promises";
+@@ -0,0 +1,1310 @@
++import { mkdtemp, realpath, rm } from "node:fs/promises";
 +import { tmpdir } from "node:os";
 +import { join } from "node:path";
 +import type { z } from "zod";
@@ -132,7 +348,8 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
 +import type { AgentStreamEvent } from "../../agent-sdk-types.js";
 +
-+import { ZCodeAgentSession } from "./agent.js";
++import { createTestLogger } from "../../../../test-utils/test-logger.js";
++import { ZCodeAgentClient, ZCodeAgentSession } from "./agent.js";
 +import type { HostBridge, HostSubscription } from "./host/bridge.js";
 +import type { Logger } from "./logger.js";
 +import type {
@@ -180,11 +397,14 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +
 +class FakeBridge implements HostBridge {
 +  readonly calls: Array<{ method: string; params: unknown }> = [];
-+  private handler: ((event: DynamicEvent) => Promise<void> | void) | undefined;
++  private handler:
++    | ((event: DynamicEvent) => Promise<void> | void)
++    | undefined;
 +
 +  constructor(private current: SessionSnapshot) {}
 +
 +  emitModeOnSet = false;
++  collapseModelsOnSetMode = false;
 +
 +  async request<Schema extends z.ZodType>(
 +    method: string,
@@ -193,7 +413,17 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +  ): Promise<z.output<Schema>> {
 +    this.calls.push({ method, params });
 +    let result: unknown = null;
-+    if (method === "sendPrompt") {
++    if (method === "initialize") {
++      result = { available: true };
++    } else if (method === "readWorkspaceState") {
++      result = {
++        workspace: this.current.session.workspace,
++        settings: this.current.settings,
++        modelCatalog: { providers: [{}], available: [] },
++      };
++    } else if (method === "createSession" || method === "resumeSession") {
++      result = this.current;
++    } else if (method === "sendPrompt") {
 +      result = { sessionId: "session-1", accepted: true };
 +    } else if (method === "getTaskTokenUsage") {
 +      result = {
@@ -214,11 +444,26 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +          mode: { current: value.mode },
 +        },
 +      };
++      if (this.collapseModelsOnSetMode) {
++        this.current.settings.model.available =
++          this.current.settings.model.available.filter(
++            (entry) =>
++              entry.ref.modelId ===
++              this.current.settings.model.current.modelId
++          );
++      }
 +      result = this.current;
 +      if (this.emitModeOnSet) {
 +        await this.emit(stateUpdate({ mode: { current: value.mode } }));
 +      }
-+    } else if (method === "setModel" || method === "setThoughtLevel") {
++    } else if (method === "setModel") {
++      this.current.settings.model.current = (
++        params as {
++          model: SessionSnapshot["settings"]["model"]["current"];
++        }
++      ).model;
++      result = this.current;
++    } else if (method === "setThoughtLevel") {
 +      result = this.current;
 +    }
 +    return resultSchema.parse(result);
@@ -257,7 +502,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +};
 +
 +async function fixture() {
-+  const workspace = await mkdtemp(join(tmpdir(), "paseo-zcode-session-"));
++  const workspace = await realpath(
++    await mkdtemp(join(tmpdir(), "paseo-zcode-session-"))
++  );
 +  temporaryDirectories.push(workspace);
 +  const initial = snapshot(workspace);
 +  const bridge = new FakeBridge(initial);
@@ -280,6 +527,30 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      sessionId: "session-1",
 +      revision: 1,
 +      patch,
++    },
++  };
++}
++
++function modeEvent(
++  mode: string,
++  previousMode: string,
++  seq: number
++): DynamicEvent {
++  return {
++    type: "session.event",
++    event: {
++      type: "session.updated",
++      eventId: `mode-${seq}`,
++      sessionId: "session-1",
++      seq,
++      timestamp: seq,
++      deliveryKind: "desktop-continuous",
++      payload: {
++        mode,
++        previousMode,
++        source: "tool",
++        toolCallId: "exit-plan",
++      },
 +    },
 +  };
 +}
@@ -351,6 +622,95 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +}
 +
 +describe("ZCode mode synchronization", () => {
++  it.each(["build", "edit", "yolo"])(
++    "restores %s from the actual session.updated approval event without state.updated",
++    async (target) => {
++      const { bridge, session, initial } = await fixture();
++      await session.setMode(target);
++      await session.setMode("plan");
++      const events: AgentStreamEvent[] = [];
++      session.subscribe((event) => events.push(event));
++      const run = session.run("Plan and implement");
++      await vi.waitFor(() =>
++        expect(
++          bridge.calls.some((call) => call.method === "sendPrompt")
++        ).toBe(true)
++      );
++      await requestPlan(bridge, "question");
++      await session.respondToPermission(
++        session.getPendingPermissions()[0]!.id,
++        { behavior: "allow", selectedActionId: "approve" }
++      );
++      expect(await session.getCurrentMode()).toBe("plan");
++      await bridge.emit(modeEvent(target, "plan", 1));
++      expect(await session.getCurrentMode()).toBe(target);
++      expect(await session.getRuntimeInfo()).toMatchObject({
++        modeId: target,
++      });
++      expect(events.filter((e) => e.type === "mode_changed")).toEqual([
++        expect.objectContaining({ currentModeId: target }),
++      ]);
++      await bridge.emit(stateUpdate({ mode: { current: target } }));
++      await bridge.emit({
++        type: "snapshot",
++        snapshot: {
++          ...initial,
++          settings: { ...initial.settings, mode: { current: target } },
++        },
++      });
++      expect(
++        events.filter((e) => e.type === "mode_changed")
++      ).toHaveLength(1);
++      expect(
++        bridge.calls.filter((c) => c.method === "setMode")
++      ).toHaveLength(2);
++      expect(
++        bridge.calls.filter((c) => c.method === "sendPrompt")
++      ).toHaveLength(1);
++      await completeTurn(bridge, 2);
++      await run;
++    }
++  );
++
++  it("handles native entry and exit while idle and leaves unrelated session updates alone", async () => {
++    const { bridge, session } = await fixture();
++    await session.setMode("edit");
++    await bridge.emit(modeEvent("plan", "edit", 1));
++    expect(await session.getCurrentMode()).toBe("plan");
++    await bridge.emit(modeEvent("edit", "plan", 2));
++    expect(await session.getCurrentMode()).toBe("edit");
++    const event = modeEvent("edit", "plan", 3);
++    if (event.type !== "session.event")
++      throw new Error("invalid fixture");
++    await bridge.emit({
++      ...event,
++      event: { ...event.event, payload: { status: "idle" } },
++    });
++    expect(await session.getCurrentMode()).toBe("edit");
++  });
++
++  it.each([
++    { mode: "future", previousMode: "plan", source: "tool" },
++    { mode: 1, previousMode: "plan", source: "tool" },
++    { mode: "edit", previousMode: "future", source: "tool" },
++    { mode: "edit", previousMode: "plan", source: "future" },
++  ])("rejects an invalid native mode event: %j", async (payload) => {
++    const { bridge, session } = await fixture();
++    const run = session.run("Work");
++    const failure = expect(run).rejects.toThrow();
++    await vi.waitFor(() =>
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
++    );
++    const event = modeEvent("edit", "plan", 1);
++    if (event.type !== "session.event")
++      throw new Error("invalid fixture");
++    await bridge.emit({ ...event, event: { ...event.event, payload } });
++    await failure;
++    expect(await session.getCurrentMode()).toBe("plan");
++  });
++
 +  it.each(["permission", "question"] as const)(
 +    "follows delayed native mode changes after %s plan approval",
 +    async (source) => {
@@ -396,7 +756,10 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +          modeId: target,
 +        });
 +        expect(modes()).toEqual([
-+          expect.objectContaining({ currentModeId: target, provider: "zcode" }),
++          expect.objectContaining({
++            currentModeId: target,
++            provider: "zcode",
++          }),
 +        ]);
 +        await bridge.emit(stateUpdate({ mode: { current: target } }));
 +        await bridge.emit({
@@ -408,10 +771,12 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +        });
 +        expect(modes()).toHaveLength(1);
 +        await completeTurn(bridge, ++seq);
-+        await expect(run).resolves.toMatchObject({ sessionId: "session-1" });
-+        expect(events.some((event) => event.type === "turn_completed")).toBe(
-+          true
-+        );
++        await expect(run).resolves.toMatchObject({
++          sessionId: "session-1",
++        });
++        expect(
++          events.some((event) => event.type === "turn_completed")
++        ).toBe(true);
 +        expect(events.some((event) => event.type === "turn_failed")).toBe(
 +          false
 +        );
@@ -431,15 +796,17 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      await session.respondToPermission(pending.id, {
 +        behavior: "deny",
 +        selectedActionId:
-+          source === "permission" ? "dismiss" : "zcode-plan-dismiss:mode-plan",
++          source === "permission"
++            ? "dismiss"
++            : "zcode-plan-dismiss:mode-plan",
 +      });
 +      expect(await session.getCurrentMode()).toBe("plan");
-+      expect(events.filter((event) => event.type === "mode_changed")).toEqual(
-+        []
-+      );
-+      expect(bridge.calls.filter((call) => call.method === "setMode")).toEqual(
-+        []
-+      );
++      expect(
++        events.filter((event) => event.type === "mode_changed")
++      ).toEqual([]);
++      expect(
++        bridge.calls.filter((call) => call.method === "setMode")
++      ).toEqual([]);
 +      await completeTurn(bridge);
 +    }
 +  );
@@ -481,7 +848,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      });
 +    }
 +    expect(await session.getCurrentMode()).toBe("plan");
-+    expect(events.filter((event) => event.type === "mode_changed")).toEqual([]);
++    expect(
++      events.filter((event) => event.type === "mode_changed")
++    ).toEqual([]);
 +  });
 +
 +  it.each([
@@ -519,9 +888,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      const run = session.run("Work");
 +      const failure = expect(run).rejects.toThrow();
 +      await vi.waitFor(() =>
-+        expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+          true
-+        )
++        expect(
++          bridge.calls.some((call) => call.method === "sendPrompt")
++        ).toBe(true)
 +      );
 +      await bridge.emit({
 +        type: "state.updated",
@@ -535,9 +904,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      });
 +      await failure;
 +      expect(await session.getCurrentMode()).toBe("plan");
-+      expect(events.filter((event) => event.type === "mode_changed")).toEqual(
-+        []
-+      );
++      expect(
++        events.filter((event) => event.type === "mode_changed")
++      ).toEqual([]);
 +      expect(
 +        bridge.calls.filter((call) => call.method === "cancelGeneration")
 +      ).toHaveLength(1);
@@ -597,9 +966,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    session.subscribe((event) => events.push(event));
 +    const run = session.run("hello");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    expect(bridge.calls.map((call) => call.method).slice(0, 2)).toEqual([
 +      "subscribe",
@@ -645,7 +1014,11 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      snapshot: {
 +        ...initial,
 +        todos: [
-+          { content: "Implement", status: "in_progress", priority: "high" },
++          {
++            content: "Implement",
++            status: "in_progress",
++            priority: "high",
++          },
 +        ],
 +      },
 +    });
@@ -720,7 +1093,10 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      session.subscribe((event) => events.push(event));
 +      await session.startTurn("Use Explore to read marker.txt");
 +      let seq = 0;
-+      const emit = async (type: string, payload: Record<string, unknown>) => {
++      const emit = async (
++        type: string,
++        payload: Record<string, unknown>
++      ) => {
 +        seq += 1;
 +        await bridge.emit({
 +          type: "session.event",
@@ -807,7 +1183,11 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +        childToolCallId: "read",
 +        description: "Read marker",
 +      };
-+      await emit("tool.updated", { ...child, kind: "started", startedAt: 2 });
++      await emit("tool.updated", {
++        ...child,
++        kind: "started",
++        startedAt: 2,
++      });
 +      await assertHistory();
 +      const output = {
 +        success: terminalKind === "result",
@@ -841,7 +1221,11 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +        { type: "unknown", input: parentInput, output: null },
 +        { type: "unknown", input: null, output: null },
 +        { type: "unknown", input: null, output },
-+        { type: "unknown", input: parentInput, output: "Explore finished" },
++        {
++          type: "unknown",
++          input: parentInput,
++          output: "Explore finished",
++        },
 +      ]);
 +      expect(tools[2]).toMatchObject({
 +        status: terminalKind === "result" ? "completed" : "failed",
@@ -856,9 +1240,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    const { bridge, session } = await fixture();
 +    const first = session.run("first");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    await expect(session.run("second")).rejects.toThrow(/active turn/u);
 +    await bridge.emit({
@@ -882,16 +1266,20 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    session.subscribe((event) => events.push(event));
 +    const run = session.run("plan");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    await bridge.emit({
 +      type: "snapshot",
 +      snapshot: {
 +        ...initial,
 +        todos: [
-+          { content: "Separate todo", status: "pending", priority: "medium" },
++          {
++            content: "Separate todo",
++            status: "pending",
++            priority: "medium",
++          },
 +        ],
 +      },
 +    });
@@ -994,9 +1382,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    const { bridge, session } = await fixture();
 +    const run = session.run("ask");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    await bridge.emit({
 +      type: "userInput.request",
@@ -1019,7 +1407,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +      updatedInput: { answers: { Choice: "Displayed" } },
 +    });
 +    expect(
-+      bridge.calls.find((call) => call.method === "respondStructuredInput")
++      bridge.calls.find(
++        (call) => call.method === "respondStructuredInput"
++      )
 +    ).toEqual({
 +      method: "respondStructuredInput",
 +      params: {
@@ -1055,9 +1445,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    const { bridge, session } = await fixture();
 +    const run = session.run("unknown");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    await bridge.emit({
 +      type: "session.event",
@@ -1081,9 +1471,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    const { bridge, session } = await fixture();
 +    const run = session.run("sequence");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    await bridge.emit({
 +      type: "session.event",
@@ -1131,9 +1521,9 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    const { bridge, session } = await fixture();
 +    const run = session.run("cancel");
 +    await vi.waitFor(() =>
-+      expect(bridge.calls.some((call) => call.method === "sendPrompt")).toBe(
-+        true
-+      )
++      expect(
++        bridge.calls.some((call) => call.method === "sendPrompt")
++      ).toBe(true)
 +    );
 +    const interrupted = session.interrupt();
 +    await vi.waitFor(() =>
@@ -1161,13 +1551,112 @@ index 0000000000000000000000000000000000000000..abf1ca9a0a605ee93af1b15c68150bc9
 +    ).toHaveLength(1);
 +  });
 +});
++
++describe("ZCode creation from a Plan draft", () => {
++  async function clientFixture() {
++    const { workspace, bridge, initial } = await fixture();
++    initial.settings.model.available.push({
++      ref: { providerId: "provider", modelId: "model-2" },
++      label: "Model 2",
++    });
++    bridge.collapseModelsOnSetMode = true;
++    const client = new ZCodeAgentClient(createTestLogger());
++    vi.spyOn(
++      client as unknown as { getBridge(): Promise<HostBridge> },
++      "getBridge"
++    ).mockResolvedValue(bridge);
++    return { client, workspace, bridge };
++  }
++  it.each(["build", "edit", "yolo"])(
++    "applies %s before Plan once, without a prompt",
++    async (planReturnMode) => {
++      const { client, workspace, bridge } = await clientFixture();
++      const session = await client.createSession({
++        provider: "zcode",
++        cwd: workspace,
++        modeId: "plan",
++        providerOptions: { planReturnMode },
++        model: '["provider","model-2",null]',
++        thinkingOptionId: "high",
++      });
++      expect(
++        bridge.calls
++          .filter((c) =>
++            ["setModel", "setThoughtLevel", "setMode"].includes(c.method)
++          )
++          .map((c) => c.method)
++      ).toEqual(["setModel", "setThoughtLevel", "setMode", "setMode"]);
++      expect(
++        bridge.calls
++          .filter((c) => c.method === "setMode")
++          .map((c) => c.params)
++      ).toEqual([
++        expect.objectContaining({ mode: planReturnMode }),
++        expect.objectContaining({ mode: "plan" }),
++      ]);
++      expect(bridge.calls.some((c) => c.method === "sendPrompt")).toBe(
++        false
++      );
++      expect(await session.getCurrentMode()).toBe("plan");
++      bridge.calls.length = 0;
++      await client.resumeSession(
++        { provider: "zcode", sessionId: session.id },
++        {
++          cwd: workspace,
++          modeId: "plan",
++          providerOptions: { planReturnMode },
++        }
++      );
++      expect(
++        bridge.calls
++          .filter((c) => c.method === "setMode")
++          .map((c) => c.params)
++      ).toEqual([expect.objectContaining({ mode: "plan" })]);
++    }
++  );
++  it("leaves an initially Plan draft's native default alone", async () => {
++    const { client, workspace, bridge } = await clientFixture();
++    await client.createSession({
++      provider: "zcode",
++      cwd: workspace,
++      modeId: "plan",
++    });
++    expect(
++      bridge.calls
++        .filter((c) => c.method === "setMode")
++        .map((c) => c.params)
++    ).toEqual([expect.objectContaining({ mode: "plan" })]);
++  });
++  it.each([
++    { modeId: "plan", providerOptions: { planReturnMode: "plan" } },
++    { modeId: "plan", providerOptions: { planReturnMode: "future" } },
++    { modeId: "edit", providerOptions: { planReturnMode: "yolo" } },
++    { modeId: "plan", providerOptions: { unknown: true } },
++  ])(
++    "rejects invalid creation options before creating a session: %j",
++    async (config) => {
++      const { client, workspace, bridge } = await clientFixture();
++      await expect(
++        client.createSession({
++          provider: "zcode",
++          cwd: workspace,
++          ...config,
++        })
++      ).rejects.toThrow();
++      expect(bridge.calls.some((c) => c.method === "createSession")).toBe(
++        false
++      );
++    }
++  );
++});
 diff --git a/packages/server/src/server/agent/providers/zcode/agent.ts b/packages/server/src/server/agent/providers/zcode/agent.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd76b4192a0
+index 0000000000000000000000000000000000000000..6206706d89a3ba98bcea8e9ba40f8201b3cb24c7
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/agent.ts
-@@ -0,0 +1,1792 @@
+@@ -0,0 +1,1895 @@
 +import { randomUUID } from "node:crypto";
++import { ZCodeProviderOptionsSchema } from "./options.js";
 +import { homedir } from "node:os";
 +import { isAbsolute } from "node:path";
 +import { realpath, stat } from "node:fs/promises";
@@ -1239,6 +1728,7 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +  SessionListSchema,
 +  SessionSettingsSchema,
 +  SessionModePatchSchema,
++  SessionModeChangedSchema,
 +  SessionSnapshotSchema,
 +  StateUpdatedNotificationSchema,
 +  SendPromptResultSchema,
@@ -1268,7 +1758,6 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +};
 +
 +const KNOWN_NOOP_EVENTS = new Set([
-+  "session.updated",
 +  "streamRecovery.updated",
 +  "turn.started",
 +  "permission.requested",
@@ -1349,6 +1838,15 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    _options?: AgentCreateSessionOptions
 +  ): Promise<AgentSession> {
 +    this.assertRunning();
++    const options = ZCodeProviderOptionsSchema.parse(
++      config.providerOptions ?? {}
++    );
++    if (
++      options.planReturnMode !== undefined &&
++      config.modeId !== "plan"
++    ) {
++      throw new Error("planReturnMode requires initial plan mode");
++    }
 +    const workspace = await resolveWorkspace(config.cwd);
 +    const bridge = await this.getBridge();
 +    await initializeWorkspace(bridge, workspace);
@@ -1370,7 +1868,17 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      onClose: () => this.sessions.delete(session),
 +    });
 +    this.sessions.add(session);
-+    await session.applyInitialConfig(config);
++    // Replay the draft's selection before entering Plan. ZCode owns prePlanMode
++    // and restores it after approval; never replay this on session resume.
++    // setMode snapshots only expose the current model; select model/thinking
++    // first, while the creation snapshot still contains the full catalog.
++    await session.applyInitialConfig(
++      options.planReturnMode === undefined
++        ? config
++        : { ...config, modeId: options.planReturnMode }
++    );
++    if (options.planReturnMode !== undefined)
++      await session.setMode("plan");
 +    return session;
 +  }
 +
@@ -1423,7 +1931,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      onClose: () => this.sessions.delete(session),
 +    });
 +    this.sessions.add(session);
-+    if (overrides !== undefined) await session.applyInitialConfig(overrides);
++    if (overrides !== undefined)
++      await session.applyInitialConfig(overrides);
 +    return session;
 +  }
 +
@@ -1574,7 +2083,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      );
 +      return {
 +        diagnostic: JSON.stringify({
-+          available: runtime.compatibility === "supported" && smoke.passed,
++          available:
++            runtime.compatibility === "supported" && smoke.passed,
 +          reason: runtime.compatibilityReason,
 +          appVersion: runtime.identity.appVersion,
 +          cliVersion: runtime.identity.cliVersion,
@@ -1618,8 +2128,13 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    }
 +  }
 +
-+  private async runtime(signal?: AbortSignal): Promise<DiscoveredRuntime> {
-+    const runtime = await discoverRuntime({ ...this.discoveryOptions, signal });
++  private async runtime(
++    signal?: AbortSignal
++  ): Promise<DiscoveredRuntime> {
++    const runtime = await discoverRuntime({
++      ...this.discoveryOptions,
++      signal,
++    });
 +    assertRuntimeSupported(runtime);
 +    const smoke = await runRuntimeSmoke(
 +      runtime,
@@ -1666,7 +2181,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +  readonly provider = ZCODE_PROVIDER_ID;
 +  readonly capabilities = CAPABILITIES;
 +  readonly id: string;
-+  private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
++  private readonly listeners = new Set<
++    (event: AgentStreamEvent) => void
++  >();
 +  private readonly pending = new Map<string, PendingInteraction>();
 +  private readonly history: AgentTimelineItem[];
 +  private subscription!: HostSubscription;
@@ -1715,7 +2232,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    return session;
 +  }
 +
-+  async applyInitialConfig(config: Partial<AgentSessionConfig>): Promise<void> {
++  async applyInitialConfig(
++    config: Partial<AgentSessionConfig>
++  ): Promise<void> {
 +    if (config.model !== undefined) await this.setModel(config.model);
 +    if (config.thinkingOptionId !== undefined) {
 +      await this.setThinkingOption(config.thinkingOptionId);
@@ -1760,7 +2279,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      provider: this.provider,
 +      sessionId: this.id,
 +      model: encodeModel(this.snapshot.settings.model.current),
-+      thinkingOptionId: this.snapshot.settings.thoughtLevel.current ?? null,
++      thinkingOptionId:
++        this.snapshot.settings.thoughtLevel.current ?? null,
 +      modeId: requireMode(this.snapshot.settings.mode.current),
 +      extra: { zcodeVersion: "3.11.2" },
 +    };
@@ -1823,14 +2343,20 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +          );
 +        }
 +        const action = pending.actions.get(response.selectedActionId);
-+        if (action === undefined || action.behavior !== response.behavior) {
++        if (
++          action === undefined ||
++          action.behavior !== response.behavior
++        ) {
 +          throw new AdapterError(
 +            "NATIVE_PROTOCOL_ERROR",
 +            "ZCode permission response does not match the published action"
 +          );
 +        }
 +        nativeResponseAttempted = true;
-+        await this.respondPermission(pending.nativeRequestId, action.optionId);
++        await this.respondPermission(
++          pending.nativeRequestId,
++          action.optionId
++        );
 +      } else if (pending.source === "question") {
 +        const nativeResponse =
 +          response.behavior === "deny"
@@ -1852,7 +2378,10 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +          response.selectedActionId === undefined
 +            ? undefined
 +            : pending.actions.get(response.selectedActionId);
-+        if (selected === undefined || selected.behavior !== response.behavior) {
++        if (
++          selected === undefined ||
++          selected.behavior !== response.behavior
++        ) {
 +          throw new AdapterError(
 +            "NATIVE_PROTOCOL_ERROR",
 +            "ZCode plan response does not match the published action"
@@ -2007,7 +2536,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    });
 +  }
 +
-+  async setThinkingOption(thinkingOptionId: string | null): Promise<void> {
++  async setThinkingOption(
++    thinkingOptionId: string | null
++  ): Promise<void> {
 +    this.assertIdle();
 +    if (
 +      thinkingOptionId === null ||
@@ -2079,7 +2610,11 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      reject,
 +    };
 +    this.active = active;
-+    this.emit({ type: "turn_started", provider: this.provider, turnId: id });
++    this.emit({
++      type: "turn_started",
++      provider: this.provider,
++      turnId: id,
++    });
 +    const userItem: AgentTimelineItem = {
 +      type: "user_message",
 +      text: nativePrompt.content,
@@ -2228,7 +2763,10 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +        "ZCode event belongs to another session"
 +      );
 +    }
-+    if (this.lastSequence !== undefined && event.seq <= this.lastSequence) {
++    if (
++      this.lastSequence !== undefined &&
++      event.seq <= this.lastSequence
++    ) {
 +      throw new AdapterError(
 +        "NATIVE_PROTOCOL_ERROR",
 +        "ZCode event sequence is duplicated or out of order"
@@ -2237,6 +2775,22 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    this.lastSequence = event.seq;
 +    const active = this.active;
 +    if (event.type === "session.titleUpdated") return;
++    if (event.type === "session.updated") {
++      // ZCode maps session_mode_changed to session.updated, preserving its
++      // payload. Tool-driven changes do not publish state.updated.
++      if ("previousMode" in event.payload) {
++        const change = SessionModeChangedSchema.parse(event.payload);
++        requireMode(change.previousMode);
++        this.updateSnapshot({
++          ...this.snapshot,
++          settings: {
++            ...this.snapshot.settings,
++            mode: { current: change.mode },
++          },
++        });
++      }
++      return;
++    }
 +    if (KNOWN_NOOP_EVENTS.has(event.type)) return;
 +    if (active === undefined) {
 +      throw new AdapterError(
@@ -2285,7 +2839,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    active: ActiveTurn,
 +    payload: Record<string, unknown>
 +  ): void {
-+    const kind = typeof payload.kind === "string" ? payload.kind : undefined;
++    const kind =
++      typeof payload.kind === "string" ? payload.kind : undefined;
 +    const delta = typeof payload.delta === "string" ? payload.delta : "";
 +    if (kind === "text_delta" || kind === "reasoning_delta") {
 +      if (delta === "") return;
@@ -2304,7 +2859,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      return;
 +    }
 +    const callId =
-+      typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
++      typeof payload.toolCallId === "string"
++        ? payload.toolCallId
++        : undefined;
 +    if (callId === undefined) {
 +      throw new AdapterError(
 +        "NATIVE_PROTOCOL_ERROR",
@@ -2312,7 +2869,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      );
 +    }
 +    const tool = active.tools.get(callId) ?? {
-+      name: typeof payload.toolName === "string" ? payload.toolName : "tool",
++      name:
++        typeof payload.toolName === "string" ? payload.toolName : "tool",
 +      input: null,
 +      output: null,
 +      status: "running" as const,
@@ -2340,10 +2898,13 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    active: ActiveTurn,
 +    payload: Record<string, unknown>
 +  ): void {
-+    const kind = typeof payload.kind === "string" ? payload.kind : undefined;
++    const kind =
++      typeof payload.kind === "string" ? payload.kind : undefined;
 +    if (kind === "batch") return;
 +    const callId =
-+      typeof payload.toolCallId === "string" ? payload.toolCallId : undefined;
++      typeof payload.toolCallId === "string"
++        ? payload.toolCallId
++        : undefined;
 +    if (callId === undefined) {
 +      throw new AdapterError(
 +        "NATIVE_PROTOCOL_ERROR",
@@ -2351,7 +2912,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      );
 +    }
 +    const tool = active.tools.get(callId) ?? {
-+      name: typeof payload.toolName === "string" ? payload.toolName : "tool",
++      name:
++        typeof payload.toolName === "string" ? payload.toolName : "tool",
 +      // ZCode child tool notifications omit input. Paseo represents unavailable
 +      // input as null; undefined would invalidate the entire history response.
 +      input:
@@ -2362,7 +2924,11 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      status: "running" as const,
 +    };
 +    active.tools.set(callId, tool);
-+    if (kind === "scheduled" || kind === "started" || kind === "progress") {
++    if (
++      kind === "scheduled" ||
++      kind === "started" ||
++      kind === "progress"
++    ) {
 +      if (tool.status !== "running") {
 +        throw new AdapterError(
 +          "NATIVE_PROTOCOL_ERROR",
@@ -2526,7 +3092,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      provider: this.provider,
 +      error: message,
 +      code:
-+        error instanceof AdapterError ? error.code : "NATIVE_PROTOCOL_ERROR",
++        error instanceof AdapterError
++          ? error.code
++          : "NATIVE_PROTOCOL_ERROR",
 +      turnId: active.id,
 +    });
 +    active.settled = true;
@@ -2541,7 +3109,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    active.resolve(result);
 +  }
 +
-+  private async handlePermission(request: PermissionRequest): Promise<void> {
++  private async handlePermission(
++    request: PermissionRequest
++  ): Promise<void> {
 +    if (request.sessionId !== this.id) {
 +      throw new AdapterError(
 +        "NATIVE_PROTOCOL_ERROR",
@@ -2565,12 +3135,15 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +      const mapped: AgentPermissionRequest = {
 +        id,
 +        provider: this.provider,
-+        name: markdown === undefined ? request.toolName : "ZCodePlanApproval",
++        name:
++          markdown === undefined ? request.toolName : "ZCodePlanApproval",
 +        kind: markdown === undefined ? "tool" : "plan",
 +        title: markdown === undefined ? request.toolName : "Plan",
 +        description: request.reason,
 +        input:
-+          markdown === undefined ? record(request.input) : { plan: markdown },
++          markdown === undefined
++            ? record(request.input)
++            : { plan: markdown },
 +        actions,
 +        ...(markdown === undefined
 +          ? {
@@ -2610,7 +3183,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    }
 +  }
 +
-+  private async handleUserInput(request: UserInputRequest): Promise<void> {
++  private async handleUserInput(
++    request: UserInputRequest
++  ): Promise<void> {
 +    if (request.sessionId !== this.id) {
 +      throw new AdapterError(
 +        "NATIVE_PROTOCOL_ERROR",
@@ -2664,7 +3239,10 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +            );
 +          }
 +          seen.add(option.value);
-+          actions.set(option.value, { behavior: "allow", value: option.value });
++          actions.set(option.value, {
++            behavior: "allow",
++            value: option.value,
++          });
 +          return {
 +            id: option.value,
 +            label: option.label,
@@ -2748,7 +3326,10 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +              "Pending permission has no deny action"
 +            );
 +          }
-+          await this.respondPermission(pending.nativeRequestId, deny.optionId);
++          await this.respondPermission(
++            pending.nativeRequestId,
++            deny.optionId
++          );
 +        } else {
 +          await this.respondStructuredInput(pending.nativeRequestId, {
 +            action: cancel ? "cancel" : "decline",
@@ -2759,7 +3340,9 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +          provider: this.provider,
 +          requestId: id,
 +          resolution: { behavior: "deny", interrupt: cancel },
-+          ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
++          ...(pending.turnId === undefined
++            ? {}
++            : { turnId: pending.turnId }),
 +        });
 +      } catch (error) {
 +        this.logger.error("zcode.interaction.cleanup_failed", error, {
@@ -2818,7 +3401,11 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    };
 +    const active = this.active;
 +    if (active === undefined) {
-+      this.emit({ type: "timeline", provider: this.provider, item: timeline });
++      this.emit({
++        type: "timeline",
++        provider: this.provider,
++        item: timeline,
++      });
 +    } else {
 +      this.pushTimeline(active, timeline);
 +    }
@@ -2845,7 +3432,10 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +    }
 +  }
 +
-+  private pushTimeline(active: ActiveTurn, item: AgentTimelineItem): void {
++  private pushTimeline(
++    active: ActiveTurn,
++    item: AgentTimelineItem
++  ): void {
 +    active.timeline.push(item);
 +    this.history.push(item);
 +    this.emit({
@@ -2956,7 +3546,8 @@ index 0000000000000000000000000000000000000000..44a4b1bdf2069fa47658e9ef9a0aacd7
 +}
 +
 +function safeError(error: unknown): string {
-+  if (error instanceof AdapterError) return `${error.code}: ${error.message}`;
++  if (error instanceof AdapterError)
++    return `${error.code}: ${error.message}`;
 +  return "ZCode provider operation failed";
 +}
 diff --git a/packages/server/src/server/agent/providers/zcode/discovery/discover.ts b/packages/server/src/server/agent/providers/zcode/discovery/discover.ts
@@ -5686,6 +6277,17 @@ index 0000000000000000000000000000000000000000..72394e52e61f1d3c27feb4493418df43
 +  }
 +  return values;
 +}
+diff --git a/packages/server/src/server/agent/providers/zcode/options.ts b/packages/server/src/server/agent/providers/zcode/options.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2833ab342eb5339db89c0a5e0eefeacf9cd3bbc5
+--- /dev/null
++++ b/packages/server/src/server/agent/providers/zcode/options.ts
+@@ -0,0 +1,5 @@
++import { z } from "zod";
++
++export const ZCodeProviderOptionsSchema = z.strictObject({
++  planReturnMode: z.enum(["build", "edit", "yolo"]).optional(),
++});
 diff --git a/packages/server/src/server/agent/providers/zcode/protocol-client.test.ts b/packages/server/src/server/agent/providers/zcode/protocol-client.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..bbf0aab4ae334f7ca00ba1c0781c755cdcc1498d
@@ -6330,10 +6932,10 @@ index 0000000000000000000000000000000000000000..6defb149fd30e637c7fd27b6be0a117e
 +}
 diff --git a/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts b/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..442056af5f2aec420da2dd1d4ef810c54c35362c
+index 0000000000000000000000000000000000000000..9ab08f61206bbb39ba7cd13bdf246cef57b1c2b9
 --- /dev/null
 +++ b/packages/server/src/server/agent/providers/zcode/protocol/v1/host-schemas.ts
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,331 @@
 +import { z } from "zod";
 +
 +const RecordSchema = z.record(z.string(), z.unknown());
@@ -6421,6 +7023,15 @@ index 0000000000000000000000000000000000000000..442056af5f2aec420da2dd1d4ef810c5
 +
 +export const SessionModePatchSchema = SessionSettingsSchema.pick({ mode: true })
 +  .partial()
++  .passthrough();
++
++export const SessionModeChangedSchema = z
++  .object({
++    mode: z.string().min(1),
++    previousMode: z.string().min(1),
++    source: z.enum(["tool", "command"]),
++    toolCallId: z.string().min(1).optional(),
++  })
 +  .passthrough();
 +
 +export const SessionSnapshotSchema = z

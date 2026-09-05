@@ -61,7 +61,7 @@
 - model refの可逆ID、重複/unknown ID拒否
 - thinking optionのcurrent/available/set
 - modeのcurrent/available/setと未知mode拒否
-- sessionの`state.updated.patch.mode.current`とsnapshotからのmode同期、手動変更の応答と通知が重なった場合の重複抑止
+- sessionの`state.updated.patch.mode.current`、`session.updated`のmode変更payload、snapshotからのmode同期。各経路と手動変更の応答が重なった場合の重複抑止
 - modeを含まないpatchとsession以外のscopeでmodeを変更しないこと。不正な通知、別session/workspace、未知modeでturnを失敗させること
 - model provider未設定時のactionable diagnostic
 - slash commandsとMCP server mapping
@@ -131,6 +131,14 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 - attachmentとMCP server
 - cancel、resume、history、session list/import
 
+### 新規作成画面でのPlan開始
+
+1. 最初のメッセージを送信する前にZCodeの`build` / `edit` / `yolo`を選択し、続けてPlanを選択する。
+2. 初回promptからプランを提出させ、承認後に選択した非Plan modeへ戻って同じturnで実装が完了することを確認する。
+3. Planを再選択しても復帰先が変わらず、Planから非Planへ戻して選び直すと新しい値になることを確認する。
+4. 別の新規画面を最初からPlanで開いた場合、過去のdraftの復帰先を持ち越さないことを確認する。
+5. schema、providerOptionsの受け渡し、native初期化順序とresume時の非再適用を自動testで確認する。
+
 ### Plan UX
 
 1. `plan` modeを選択する。
@@ -156,10 +164,10 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 - patcher test: 21件中20件成功、インストール済みZCodeを使う1件は通常実行ではskip。`RUN_ZCODE_RUNTIME_TEST=1`では同テストも成功。
 - overlay test: 11 file、100件成功。入力なし子ツールの成功・失敗と履歴同期の回帰testを含む。
 - protocol/serverの型検査とbuild、renderer export、overlay entry importに成功。
-- ASAR 18 entryとrenderer resource 1 entryのoverlayを同じ入力から2回生成し、overlay/ASAR/resourceのhashが一致。
+- ASAR 19 entryとrenderer resource 1 entryのoverlayを同じ入力から2回生成し、overlay/ASAR/resourceのhashが一致。
 - 実機providerでcatalog、短いprompt、stream、usage、session list、resume、history、cancel後のcleanupを確認。
 - Plan Dismissでworkspace不変、Plan Approveで同じturnから実装へ進むことを確認。
-- ZCode icon IDの対応付け以外のrenderer変更、ACP route、外部`zcode-acp`実行経路がsource patchとoverlayに含まれないことを確認。
+- ZCode icon IDの対応付けと新規draftのmode受け渡し以外のrenderer変更、ACP route、外部`zcode-acp`実行経路がsource patchとoverlayに含まれないことを確認。
 - patcher packageの`npm audit`は0件。固定Paseo 0.7.2 sourceの`npm ci`は上流依存に101件（low 8、moderate 44、high 42、critical 7）を報告。
 - 許可された旧`zcode-acp`由来のZCode Helperを終了後、`/Applications/PaseoZCode.app`の生成に成功。生成ASARとmanifestのhash一致、元Paseo ASAR不変、strict署名を確認。
 - 異なる`PASEO_HOME`とElectron user-data directoryで3回cold startし、毎回daemonがrunningになり、終了時にlifecycle RPCで正常停止した。
@@ -171,11 +179,21 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 - 修正版アプリの新規sessionで一意なpromptを送信し、user messageの吹き出しが1件だけ表示され、ZCodeの応答が正常に完了することを実画面で確認。
 - 修正版アプリでThinkingの既定値`Max`、選択肢`Low` / `High` / `Max`を確認。`High`を指定して開始したsessionが正常応答し、composerでも`High`を保持することを確認。
 - icon修正版アプリのmodel pickerでZCode providerと4 modelにGLM Agentと同じZ.ai iconが表示され、ZCode model選択後のcomposerにも同じiconが表示されることを確認。
-- `npm pack --dry-run`でmanifestが参照するASAR 18 entryとrenderer resource 1 entryがpackageへ含まれることを確認。
+- `npm pack --dry-run`でmanifestが参照するASAR 19 entryとrenderer resource 1 entryがpackageへ含まれることを確認。
 
 ### Plan承認後のモード同期修正
 
-関連115 testとprotocol/serverの型検査・build、renderer export、overlay再生成が成功した。patcherは20 test成功、実機runtimeのopt-in testは1件skip。型検査、build、format確認、生成ASARの決定性とartifact hash検証も成功した。インストール済みアプリへの反映と実画面確認は未実施であり、上記の実機結果は修正前の成果物に対するもの。詳細は[実装状況](implementation-status.md)を参照する。
+前回のstate通知だけを使った検証では、実際の承認後に届く`session.updated`を検証できていなかった。実機で再現して採取した通知形式を回帰testへ追加した。関連123 testとprotocol/serverの型検査・build、renderer export、overlay再生成が成功した。patcherは通常実行で20 test成功、実機runtimeのopt-in testは1件skip。別途opt-inを有効にしてruntime test 3件すべてが成功した。型検査、build、format確認、生成ASARの決定性とartifact hash検証も成功した。
+
+実機providerで`build` / `edit` / `yolo`からPlanを2回指定して承認し、3例すべてで直前のmodeへの復帰、provider値との一致、同じturnでのファイル作成を確認した。修正版を`/Applications/PaseoZCode.app`へ反映し、実画面でも`Edit automatically → Plan mode → Approve → Edit automatically`と実装完了を確認した。更新後のASAR hash、元Paseo ASAR不変、strict署名も確認済み。詳細は[実装状況](implementation-status.md)を参照する。
+
+### 新規作成画面のPlan直前の選択
+
+公式GUIの事前session作成とmode反映処理を調査し、新規draftでの非Plan→Planの選択をnative初期化へ引き継ぐ修正を検証した。初期model設定の前にmodeを変更した場合の実機catalog縮小も回帰testへ追加し、3件の失敗から修正後の成功を確認した。固定sourceの関連testは計334件（211件とworkspace layout store 123件）成功。protocol/serverの型検査・build、renderer export、overlay生成、patcherの20 test・型検査・build・format確認も成功した。app全体の型検査は未変更の固定sourceと同一の既存TS2322が1件あり、新規errorはない。
+
+最終providerを実機hostで新規Plan sessionとして作成し、modelをGLM-5.3-Flash、Thinkingをlowに指定した。初期復帰先build/edit/yoloと省略時buildの4例すべてで、最初のプラン承認後のnative/provider値が一致し、同じturnでファイル作成が完了した。
+
+最終アプリの実画面でも、初回送信前のFull access→Planから承認後Full accessへ戻り、ファイル作成まで完了した。別の新規画面を初期Planのまま開始した場合は、前のFull accessを引き継がずAsk before changesへ戻り、通常のファイル変更確認を一度許可して実装が完了した。ASAR/renderer hash、元Paseo ASAR不変、strict署名とpackageへの全20 overlay entryの包含を確認した。詳細と既存型errorは[実装状況](implementation-status.md#新規作成画面のplan直前の選択)を参照する。
 
 ## 8. Release判定
 
@@ -195,7 +213,7 @@ release可能なのは次をすべて満たす場合だけである。
 
 1. source commitと公式ASARを特定する。
 2. provider protocol/types/UI contractに変更がないか確認する。
-3. source patchを新commitへ移植し、ZCode icon mapping以外のrenderer差分がないことを再確認する。
+3. source patchを新commitへ移植し、ZCode icon mappingと新規draftのmode受け渡し以外のrenderer差分がないことを再確認する。
 4. 元renderer bundle path/hashを含むoverlay/manifest/hashを置換する。
 5. 全testと実機検証を完走する。
 6. 旧Paseo entry、fixture、support記述を削除する。

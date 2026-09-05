@@ -340,6 +340,22 @@ async function main(): Promise<void> {
         "packages/server/src/server/agent/provider-registry-wrap.test.ts",
         "packages/server/src/server/agent/providers/zcode",
         "packages/app/src/components/provider-icon-name.test.ts",
+        "packages/app/src/provider-selection/resolve-agent-form.test.ts",
+        "packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts",
+        "packages/app/src/composer/draft/workspace-tab.test.ts",
+      ],
+      temporaryRoot,
+    );
+    await run(
+      "npm",
+      [
+        "run",
+        "test",
+        "--workspace=@getpaseo/app",
+        "--",
+        "--project",
+        "unit",
+        "src/stores/workspace-layout-store.test.ts",
       ],
       temporaryRoot,
     );

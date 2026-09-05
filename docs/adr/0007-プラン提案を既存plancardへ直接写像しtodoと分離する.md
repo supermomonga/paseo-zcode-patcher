@@ -12,6 +12,8 @@ links:
   kind: relatesto
 - target: 11
   kind: amendedby
+- target: 12
+  kind: amendedby
 ---
 
 # プラン提案を既存PlanCardへ直接写像しtodoと分離する

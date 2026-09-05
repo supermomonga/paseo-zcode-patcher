@@ -9,3 +9,4 @@
 * [9. 元entitlementsを保持してパッチ済みアプリをad-hoc署名する](0009-元entitlementsを保持してパッチ済みアプリをad-hoc署名する.md)
 * [10. PaseoとZCodeの外部状態をパッチャーから変更しない](0010-paseoとzcodeの外部状態をパッチャーから変更しない.md)
 * [11. ZCodeプロバイダーにGLM Agentの既存アイコンを割り当てる](0011-zcodeプロバイダーにglm-agentの既存アイコンを割り当てる.md)
+* [12. 新規セッションのPlan直前の選択をZCodeへ引き継ぐ](0012-新規セッションのplan直前の選択をzcodeへ引き継ぐ.md)

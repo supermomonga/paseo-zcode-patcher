@@ -21,7 +21,7 @@ describe("release artifact", () => {
       sourceAsarSha256:
         "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
       patchedAsarSha256:
-        "7e010be089601e36daa37717ddd91baf74fc524a448a932b70b0c43c257debd2",
+        "dc5b4045d65aef875d0e3fec07a7fd4ca118bb64b6e096c9c83cc8df108f77a5",
     });
     expect(manifest.zcode).toMatchObject({
       appVersion: "3.11.2",
@@ -30,9 +30,9 @@ describe("release artifact", () => {
       protocol: "zcode-task-v1",
       requiredExports: ["g", "i", "j"],
     });
-    expect(manifest.entries).toHaveLength(18);
+    expect(manifest.entries).toHaveLength(19);
     expect(manifest.overlayHash).toBe(
-      "ab094a40bdf4c8e10c22fef7bc7a14bc3fe6565b6d943845741f79f762c08bcb",
+      "f12dff31dff52579919cc84e92779613e4b17eed12e68cada8705fb3c1697b31",
     );
     expect(
       manifest.entries.some((entry) =>
@@ -47,7 +47,7 @@ describe("release artifact", () => {
         source:
           "resources/app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
         sha256:
-          "067e03e488a5fcee5657f21da99e301c9eb31e5e6f0687481cd776c623690f77",
+          "c1b30ac6f0f12f363145b721bbc3b5e3f680a25f38d95d46abe7b77f461e715e",
         originalSha256:
           "e0bf84a5218b90f1575ead487f4cce8d20f06027eb76df1a9efdef9283c2cdc8",
       },

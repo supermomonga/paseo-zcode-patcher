@@ -4,32 +4,32 @@
 
 ## 現在の状態
 
-Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、overlay を実装している。現在の修正はPlan承認後のモード同期で、リポジトリ内のみを更新する。インストール済み`/Applications/PaseoZCode.app`への反映と、この修正の実画面確認は行っていない。下記の実機・署名・UIの証拠は修正前の成果物に対する結果である。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
+Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、overlay を実装している。Plan承認後のモード同期に加え、新規作成画面でPlanを選ぶ直前のmodeもnative sessionへ引き継ぐよう修正し、インストール済み`/Applications/PaseoZCode.app`へ反映した。今回の実機・実画面確認は下記の「新規作成画面のPlan直前の選択」に記録している。それ以前の各節は、各修正時点の検証記録である。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
 
 | Area | Status | 証拠 |
 | --- | --- | --- |
-| Architecture/ADR | complete | ADR 0002–0011 は Accepted、`adrs doctor` は error 0 |
+| Architecture/ADR | complete | ADR 0002–0012 は Accepted、`adrs doctor` は error 0 |
 | Patcher CLI | complete | `patch` 以外を拒否し、固定 path、preflight、process 検出、cleanup をテスト |
 | ASAR patcher | complete | header 保持、entry hash、marker、整合性情報、決定性を fixture で検証 |
 | Paseo source patch | complete | 固定 commit に whitespace error なしで適用し、protocol/server の型検査、build、provider icon focused test に成功 |
 | ZCode runtime discovery | complete | app/CLI/host/RPC の version、hash、export、path を実機と自動テストで検証 |
 | Host bridge | complete | method allowlist、schema、request 相関、上限、timeout、終了処理を実装 |
 | Provider/session mapper | complete | catalog、stream、履歴、permission、question、plan、todo、cancel を実装 |
-| Overlay/manifest | complete | ASAR 18 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
-| Provider runtime evidence | previous artifact verified | 修正前の実機 host で catalog、prompt、resume/history、Plan の Dismiss/Approve を確認 |
-| macOS app/signing | previous artifact verified | 修正前の`/Applications/PaseoZCode.app`でstrict署名、3回の独立cold start、正常停止を確認 |
-| UI integration | previous artifact verified | 修正前のPlanCard、model picker/composerのZ.ai iconを実画面で確認。今回のモード同期は未確認 |
+| Overlay/manifest | complete | ASAR 19 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
+| Provider runtime evidence | verified | 今回の実機hostで新規Plan開始の復帰先3種と履歴なしの計4例を検証し、native/provider値の一致と同じturnでのファイル作成を確認 |
+| macOS app/signing | verified | 今回の`/Applications/PaseoZCode.app`でmanifest hash一致、元Paseo ASAR不変、strict署名を確認。3回の独立cold startは過去の検証 |
+| UI integration | verified | 今回の実画面で初回送信前の`Full access → Plan`と初期Planの2例を検証。Approve後の表示はそれぞれFull accessとAsk before changes |
 
 ## 固定された成果物
 
 | 項目 | 値 |
 | --- | --- |
 | package | `paseo-zcode-patcher@0.1.0`、`private: true` |
-| ASAR overlay entry 数 | 18 |
+| ASAR overlay entry 数 | 19 |
 | renderer resource entry 数 | 1 |
-| renderer resource SHA-256 | `067e03e488a5fcee5657f21da99e301c9eb31e5e6f0687481cd776c623690f77` |
-| overlay SHA-256 | `ab094a40bdf4c8e10c22fef7bc7a14bc3fe6565b6d943845741f79f762c08bcb` |
-| 生成後 `app.asar` SHA-256 | `7e010be089601e36daa37717ddd91baf74fc524a448a932b70b0c43c257debd2` |
+| renderer resource SHA-256 | `c1b30ac6f0f12f363145b721bbc3b5e3f680a25f38d95d46abe7b77f461e715e` |
+| overlay SHA-256 | `f12dff31dff52579919cc84e92779613e4b17eed12e68cada8705fb3c1697b31` |
+| 生成後 `app.asar` SHA-256 | `dc5b4045d65aef875d0e3fec07a7fd4ca118bb64b6e096c9c83cc8df108f77a5` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -97,13 +97,33 @@ icon対応済み`/Applications/PaseoZCode.app`を生成し、model pickerのZCod
 
 ### Plan承認後のモード同期修正
 
-ZCodeの`state.updated`を無視していたため、承認後にnative modeが変わってもproviderの現在値とPaseoの表示に反映されなかった。また、snapshot更新時にも`mode_changed`を通知していなかった。対象sessionの`patch.mode.current`とsnapshotを共通の更新処理へ渡し、実際に値が変わったときだけ通知するよう修正した。遷移先の決定は公式ランタイムの`prePlanMode ?? "build"`に従う。
+前回の`state.updated.patch.mode.current`とsnapshotからの同期だけでは不十分だった。前回の修正がインストール済みASARへ反映されていることをhashで確認したうえで、実機で`edit → plan → Approve`を再現すると、ZCodeは`edit`へ戻りファイル作成を完了する一方、providerは`plan`のままだった。
 
-修正前に遅延通知・重複通知の回帰test 3件が失敗することを確認した。修正後はsession test 25件、固定sourceからの関連test 115件とprotocol/serverの型検査が成功した。両plan sourceからの承認、`build` / `edit` / `yolo`への遅延した変更、snapshotとの重複、実行中のPlanへの移行、Dismiss、不正な通知と別session/workspaceを検証している。
+公式`/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs`を追跡した。`updateConfig`と`enterPlanMode`はPlan以外から入るときだけ`prePlanMode`を記憶し、Planの再指定では上書きしない。`exitPlanMode`は`prePlanMode ?? "build"`へ戻し、記憶を消去する。その際の`session_mode_changed`はprotocolの`mapSessionEventType`で`session.updated`へ変換され、`{ mode, previousMode, source, toolCallId? }`が保持される。実機でも承認後の`{ mode: "edit", previousMode: "plan", source: "tool", ... }`を観測し、この変更では`state.updated`が発行されないことを確認した。
 
-固定sourceからprotocol/serverのbuild、renderer export、overlayの再生成が成功した。同じoverlayから2回生成したASARのhash一致を確認し、manifest、artifact test、文書のhashを更新した。patcherは20 test成功、実機runtimeのopt-in testは1件skip。patcherの型検査、build、format確認と`git diff --check`も成功した。
+providerが無視していた`session.updated`のmode変更payloadを検証し、既存のsnapshot更新処理を通して`mode_changed`へ反映するよう修正した。復帰先はZCode自身の記憶と決定に従い、providerから追加の`setMode`や実装開始promptは送らない。
 
-今回の反映範囲はリポジトリ内のみであり、インストール済みアプリは変更していない。この修正の実機・実画面確認は未実施である。
+実際の通知形式を使う回帰test 3件が修正前に失敗し、修正後はsession test 33件と固定sourceの関連test 123件が成功した。承認後の3モードへの復帰、実行中・待機中の変更、重複通知、不正なpayloadを検証した。前回追加したstate通知、snapshot、Dismiss、別session/workspaceの検証も継続して成功している。
+
+固定sourceからprotocol/serverの型検査・build、renderer export、overlay再生成が成功した。同じoverlayから2回生成したASARのhashが一致し、manifest、artifact test、文書のhashを更新した。patcherは通常実行で20 test成功、runtime opt-in testは1件skip。別途`RUN_ZCODE_RUNTIME_TEST=1 npm test -- test/zcode-runtime.test.ts`で実機を使うtestを含む3件すべてが成功した。patcherの型検査、build、format確認も成功した。
+
+実機ZCode hostに接続した修正版providerで、`build` / `edit` / `yolo`をそれぞれ選択してからPlanを2回指定し、プランを承認した。3例すべてで直前のmodeが復元され、providerの現在値とnative snapshotが一致し、同じturnで検証ファイルの作成が完了した。
+
+修正版アプリを生成・署名し、インストール済みASARと現在のmanifestのhash一致、元Paseo ASAR不変、strict署名を確認した。専用の`/private/tmp/zcode-mode-ui-check`でUIセッションを`Edit automatically`から開始し、`Plan mode`へ変更した。Approve前に対象ファイルが存在しないことを確認し、Approve直後に画面が`Edit automatically`へ戻ることを画像とaccessibility treeで確認した。追加promptなしで`mode-ui-check.txt`（内容`OK`）が作成され、完了後も表示が保持された。既存のユーザーセッションにはpromptを送信していない。
+
+### 新規作成画面のPlan直前の選択
+
+前回の修正は既存native sessionのmode通知を同期するもので、新規作成画面内での選択履歴を引き継いでいなかった。公式ZCode 3.11.2のrendererを調査し、送信前から内部sessionを作成し、準備済みならUIのmode変更をそのsessionへ反映することを確認した。このため新規画面でも、非PlanからPlanへの変更をnativeが記憶できる。GUIが過去のdraftの非Plan modeを別途保存する仕様ではなく、事前作成の準備状況にも依存する。根拠と関数の対応は[private protocol](zcode-private-protocol.md#zcode-guiの新規セッションとplan復帰)に記録した。
+
+Paseoの新規formで実際の非Plan→Planの選択を保持し、workspace draft/pending submissionを経て既存のproviderOptionsで作成時に渡す。model・Thinkingを設定した後、選択していた非Plan mode、Planの順にnativeへ適用する。復帰先は引き続きZCodeが決定し、承認処理からmode変更や追加promptは送らない。最初からPlanで開いた新規画面に過去のdraftの値は持ち越さず、resume時にも初期化を再実行しない。GUIのsession事前作成のタイミング差は再現しない。この限定したrenderer変更を[ADR 0012](adr/0012-新規セッションのplan直前の選択をzcodeへ引き継ぐ.md)でAcceptedとし、ADR 0002/0007/0011の改訂関係と目次を更新した。
+
+最初のUI検証では、model設定前にmodeを変更するとnativeの返却catalogが現在modelの1件だけになり、選択済みの別modelが拒否される問題を検出した。実機応答を反映する回帰test 3件の失敗を確認し、初期化順序の修正で解消した。session/client testは41件成功。固定sourceの関連testは14 fileの211件とappのworkspace layout store 123件、計334件成功した。protocol/serverの型検査・build、renderer export、overlay生成も成功した。
+
+app全体の型検査には既存の`draggable-list.native.tsx:122`の`dragGestureHostPresented`に関するTS2322が1件ある。固定commitの未変更appでも同一の出力となることを比較し、今回の追加による型errorはない。patcherは20件成功・通常実行のruntime test 1件skip、型検査・build・format確認も成功。別途runtime opt-in test 3件が成功し、packageに19 ASAR entryと1 renderer resourceが含まれることを確認した。
+
+最終overlayのproviderを実機hostへ接続し、`GLM-5.3-Flash` / Thinking `low` / 初期`plan`で作成した。`planReturnMode`が`build` / `edit` / `yolo`の3例と、省略した1例すべてで、追加のmode変更をせず最初のプランを承認した。nativeとproviderの現在値はそれぞれ指定mode（省略時build）で一致し、同じturnで内容`OK`の検証ファイルを作成した。
+
+最終成果物を`/Applications/PaseoZCode.app`へ反映し、ASAR・rendererのmanifest hash一致、元Paseo ASAR不変、strict署名を確認した。実画面で新規作成時に`Full access → Plan mode`を選び初回送信すると、Approve直後に`Full access`へ戻り、追加promptなしで`draft-yolo.txt`（内容`OK`）を作成して完了した。さらに別の新規作成画面を最初からPlanで開き、modeを変更せず送信すると、Approve直後の表示は`Ask before changes`になった。ファイル作成の通常確認をAllow onceで許可すると、追加promptなしで`draft-initial-plan.txt`（内容`OK`）を作成して完了した。両方の表示を画像とaccessibility treeで確認した。
 
 ## 配布上の制約
 
@@ -113,7 +133,7 @@ ZCodeの`state.updated`を無視していたため、承認後にnative modeが�
 
 ## 変更禁止範囲
 
-- ZCode icon IDの対応付け以外のPaseo rendererと既存UI component
+- ZCode icon IDの対応付けと新規draftのmode受け渡し以外のPaseo renderer、および既存interaction UI component
 - 既存 Paseo provider と ACP 経路
 - `zcode-acp` repository の公開 API または build
 - 元 Paseo/ZCode install artifact

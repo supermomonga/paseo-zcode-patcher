@@ -76,11 +76,21 @@ ZCode 3.11.2はworkspace stateでは`thoughtLevel.current`を返さず、`defaul
 
 ### Mode
 
-`getAvailableModes`は4つの固定modeを返し、`getCurrentMode`はsnapshotの現在値を返す。`setMode`はnative `setMode`を呼び、返却snapshotで変更を再確認する。snapshot、手動変更の応答、対象sessionの`state.updated.patch.mode.current`に共通の更新処理を使い、モードが変わったときだけ`mode_changed`を通知する。同じ値の再通知ではイベントを重複させない。
+`getAvailableModes`は4つの固定modeを返し、`getCurrentMode`はsnapshotの現在値を返す。`setMode`はnative `setMode`を呼び、返却snapshotで変更を再確認する。snapshot、手動変更の応答、対象sessionの`state.updated.patch.mode.current`、`session.updated`内のmode変更に共通の更新処理を使い、モードが変わったときだけ`mode_changed`を通知する。同じ値の再通知ではイベントを重複させない。
 
 `state.updated`は通知形式と対象sessionを検証し、workspaceが指定されていれば要求したworkspaceとの一致も確認する。session以外のscopeとmodeを含まないpatchはsessionのmodeを変更しない。不正なmodeや別sessionの通知はprotocol errorとして扱う。
 
 Plan承認後の遷移先はZCodeが決める。ZCode 3.11.2の`exitPlanMode`は`prePlanMode ?? "build"`を選び、Planに入る前のmodeが記憶されていればそこへ戻る。記憶がなければ`build`（Ask Before Changes）になる。起動時にPlanを指定しても、native session作成後に別modeから変更した場合はそのmodeが記憶される。providerは承認後のnative通知を反映し、追加の`setMode`や合成promptで遷移先を上書きしない。
+
+公式runtimeの`updateConfig`と`enterPlanMode`は、現在値がPlan以外のときだけ`prePlanMode`を記憶する。Planを再指定しても記憶を上書きしない。`exitPlanMode`は記憶したmodeを復元してから`prePlanMode`を消去し、`session_mode_changed`を記録する。protocolの`mapSessionEventType`はこのイベントを`session.updated`へ写像し、`{ mode, previousMode, source: "tool" | "command", toolCallId? }`をpayloadに保持する。providerは`previousMode`を持つpayloadをこの契約で検証する。ツールによる変更では`state.updated`が届かないため、このイベントを無視してはならない。復帰先をprovider内で別途記憶・推測しない。
+
+### 新規作成画面からのPlan開始
+
+Paseoのdraftでは、ZCodeの非Plan modeから`plan`へ変更した際の選択を`planReturnMode`として保持する。Plan再指定は保持し、非Plan・別host・別providerへ移れば消去する。作成画面を最初からPlanで開いた場合、別のdraftの復帰先は引き継がない。
+
+作成要求の既存`providerOptions.planReturnMode`に`build` / `edit` / `yolo`だけを許す。指定時は`modeId: "plan"`を必須とし、不正値・未知option・矛盾した組合せをnative session作成前に拒否する。providerは新規作成後にmodelとThinkingを設定し、その後このmode、それから`plan`を適用し、ZCode自身に`prePlanMode`を記憶させる。この初期化はresume時には繰り返さない。承認処理から追加のmode変更やpromptは送らない。
+
+ZCode GUIは送信前にsessionを事前作成するため、通常の新規作成画面でもランタイムへのmode変更が起きる。Paseoでは事前作成のライフサイクルを追加せず、送信前の選択を作成時まで保持して同じmode遷移を再現する。GUIの準備タイミングに依存する競合状態は再現対象としない。根拠と範囲は[ADR 0012](adr/0012-新規セッションのplan直前の選択をzcodeへ引き継ぐ.md)に記録する。
 
 ## 4. `AgentSession` mapping
 

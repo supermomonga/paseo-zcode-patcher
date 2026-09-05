@@ -25,7 +25,7 @@ node dist/src/cli.js patch
 
 固定対象では、生成 ASAR とrenderer resourceのhash、strict 署名、3 回の独立した cold start、ZCode の 4 model、既存 `PlanCard`、GLM Agentと同じZ.ai iconの表示まで実機確認済みです。結果は [実装状況](docs/implementation-status.md) を参照してください。
 
-現在のPlan承認後のモード同期修正はリポジトリ内のみの更新です。この修正のインストール済みアプリへの反映と実画面確認は未実施です。
+Plan承認後のモード同期と、新規作成画面でPlan直前に選んだモードの引き継ぎを修正し、`/Applications/PaseoZCode.app`へ反映済みです。実機で`build` / `edit` / `yolo`への復帰を確認しました。実画面でも初回送信前の`Full access → Plan`から承認後に`Full access`へ戻り、同じturnで実装が完了しました。別の新規画面を最初からPlanで開く場合は、前の画面の復帰先を引き継がず`Ask before changes`へ戻ることを確認しています。
 
 ## 開発と検証
 

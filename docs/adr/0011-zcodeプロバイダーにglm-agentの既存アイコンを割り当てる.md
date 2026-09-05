@@ -10,6 +10,8 @@ links:
   kind: amends
 - target: 7
   kind: amends
+- target: 12
+  kind: amendedby
 ---
 
 # ZCodeプロバイダーにGLM Agentの既存アイコンを割り当てる

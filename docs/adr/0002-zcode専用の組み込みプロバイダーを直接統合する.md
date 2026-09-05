@@ -12,6 +12,8 @@ links:
   kind: relatesto
 - target: 11
   kind: amendedby
+- target: 12
+  kind: amendedby
 ---
 
 # ZCode専用の組み込みプロバイダーを直接統合する

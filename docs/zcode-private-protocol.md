@@ -147,6 +147,8 @@ session.event
 
 `state.updated.notification`は`type: "state.updated"`、`scope: "server" | "workspace" | "session"`、non-negative `revision`、objectの`patch`と、任意の`workspace`、`sessionId`、`reason`を持つ。session scopeでは対象`sessionId`が必須である。mode変更は`patch.mode.current`に入り、`patch.status`だけの通知もある。providerはmodeを含むsession通知を検証して現在値とPaseoの表示を同期する。snapshotの再送を待たない。
 
+`session.updated`は一律のno-opではない。ZCode 3.11.2の`session_mode_changed`は`{ mode, previousMode, source, toolCallId? }`を保持してこのtypeに変換される。`previousMode`を持つpayloadでは現在・直前modeと`source: "tool" | "command"`を検証し、現在値を更新して`mode_changed`を通知する。`EnterPlanMode` / `ExitPlanMode`はこの経路を使用する。mode変更ではない`session.updated`は従来どおりno-opとする。
+
 ## 8. Reverse interaction
 
 ### Permission
@@ -179,3 +181,22 @@ headless providerはZCode desktop browser backendを持たない。公式hostか
 6. bundled CLIの`version`と`doctor --json` smoke
 
 どれかが不一致ならproviderをunavailableにする。unsafe bypass、version range、旧response parser、system runtime fallbackは設けない。
+
+## ZCode GUIの新規セッションとPlan復帰
+
+調査対象はZCode 3.11.2の`app.asar`（SHA-256 `0317216fc08f374162e5cc1b779bae5f94ef70c5eaa585cb71b8ffedc537b668`）内の`out/renderer/assets/styles-DyAcaLKy.js`。minifyされたsymbolと呼び出しを追跡した。
+
+| 処理 | 実装で確認した挙動 |
+| --- | --- |
+| `GEe` / `resolveInitialDraftConfig` | draft開始modeはworkspaceの`draftPreferredMode`または`sx()`。初期設定と現在のdraft設定を別に管理する |
+| `sx` / `zEe` | localStorageの`zcode-last-draft-collaboration-mode`へ最後に選んだmodeだけを保存。値なし・不正値の既定は`build`。`prePlanMode`は保存しない |
+| `QEe` / `rDe` | 送信前に`createSession`してdraftに関連付ける。初期設定を渡し、不要になった未使用sessionは破棄する |
+| `gr` / `onSwitchMode` | draftの選択値を更新し、準備済みsessionがあれば`switchCollaborationMode`を送る。既存sessionでも同じcommandを使う |
+| 初回送信 | 準備済みsessionの設定を揃えて同じsessionへ`sendText`。事前作成されていなければ現在のdraft設定で作成する |
+| `zcode.cjs` / `exitPlanMode` | runtimeが記憶した`prePlanMode ?? "build"`へ復帰して記憶を消す |
+
+従って、送信前に`edit → plan`や`yolo → plan`を選ぶと、通常は既にある内部sessionが変更前のmodeを記憶する。これは「直前のUI値を必ず別途保存する」という無条件の仕様ではない。事前作成の準備状況や、最初からPlanだった場合では変更履歴が異なる。保存済みPlanで別の新規画面を開いても、過去のdraftの非Plan modeをlocalStorageから復元する処理はない。
+
+Paseoは送信時に作成する構造を維持し、draft内の非PlanからPlanへの選択を初期化引数へ引き継いで同じnative遷移を作る。承認後の復帰先を別のロジックで推測しない。
+
+実機の`setMode`返却snapshotでは、`settings.model.available`が現在modelだけに縮小することを確認した。新規sessionの完全なmodel catalogを使ってmodel・Thinkingを先に設定し、その後にdraftの非Plan→Planのmode遷移を適用する。初期モデルの選択前にmodeを変更しない。
