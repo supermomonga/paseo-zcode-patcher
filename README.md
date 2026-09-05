@@ -1,10 +1,16 @@
 # paseo-zcode-patcher
 
-Creates a local macOS arm64 app copy of Paseo 0.7.2 with a built-in provider for ZCode 3.11.2. Neither ACP nor an external `zcode-acp` process is part of the execution path.
+Creates a local macOS arm64 app copy of Paseo 0.7.2 with a built-in provider for ZCode 3.11.2.
+
+> [!NOTE]
+> This project is an unofficial tool and is not officially released, endorsed, or maintained by ZCode or Z.ai.
+
+> [!WARNING]
+> paseo-zcode-patcher uses ZCode's undocumented headless mode. It does not modify the ZCode application itself or include any implementation that bypasses its communications. However, there is no guarantee that it will not be interpreted as violating the [Terms of Service](https://zcode.z.ai/en/terms). Therefore, please use it at your own risk.
 
 ## Supported environment
 
-- macOS arm64
+- macOS arm64 (Other OS support is under development)
 - Node.js 22.12.0 or later
 - Official Paseo 0.7.2 at `/Applications/Paseo.app` (the supported ASAR is strictly verified by its SHA-256 hash)
 - Official ZCode 3.11.2 / CLI 0.16.5 at `/Applications/ZCode.app`
@@ -13,7 +19,7 @@ Other versions, alternative installation paths, and modified ZCode hosts are rej
 
 ## Usage
 
-Quit Paseo, ZCode, and any processes that use the ZCode host, such as `zcode-acp`, before running:
+Quit Paseo, ZCode, and any processes that use the ZCode host before running:
 
 ```console
 npm ci --ignore-scripts
