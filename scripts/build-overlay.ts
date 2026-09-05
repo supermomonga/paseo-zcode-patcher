@@ -35,6 +35,29 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const fixedOverlaySources = [
   {
+    source: "packages/protocol/dist/messages.js",
+    target: "node_modules/@getpaseo/protocol/dist/messages.js",
+  },
+  {
+    source: "packages/client/dist/daemon-client.js",
+    target: "node_modules/@getpaseo/client/dist/daemon-client.js",
+  },
+  {
+    source: "packages/server/dist/server/server/agent/agent-manager.js",
+    target:
+      "node_modules/@getpaseo/server/dist/server/server/agent/agent-manager.js",
+  },
+  {
+    source: "packages/server/dist/server/server/session.js",
+    target: "node_modules/@getpaseo/server/dist/server/server/session.js",
+  },
+  {
+    source:
+      "packages/server/dist/server/server/session/provider/provider-catalog-session.js",
+    target:
+      "node_modules/@getpaseo/server/dist/server/server/session/provider/provider-catalog-session.js",
+  },
+  {
     source: "packages/protocol/dist/provider-config.js",
     target: "node_modules/@getpaseo/protocol/dist/provider-config.js",
   },
@@ -325,6 +348,7 @@ async function main(): Promise<void> {
       temporaryRoot,
     );
     await run("npm", ["ci", "--ignore-scripts"], temporaryRoot);
+    await run("npm", ["run", "postinstall"], temporaryRoot);
     await run("npm", ["run", "build:server-deps"], temporaryRoot);
     await run(
       "npm",
@@ -339,6 +363,8 @@ async function main(): Promise<void> {
         "packages/server/src/server/agent/provider-registry.test.ts",
         "packages/server/src/server/agent/provider-registry-wrap.test.ts",
         "packages/server/src/server/agent/providers/zcode",
+        "packages/server/src/server/session/provider/provider-catalog-session.test.ts",
+        "packages/client/src/daemon-client.test.ts",
         "packages/app/src/components/provider-icon-name.test.ts",
         "packages/app/src/provider-selection/resolve-agent-form.test.ts",
         "packages/app/src/screens/workspace/workspace-draft-agent-config.test.ts",
@@ -356,6 +382,7 @@ async function main(): Promise<void> {
         "--project",
         "unit",
         "src/stores/workspace-layout-store.test.ts",
+        "src/provider-usage/use-provider-usage.test.tsx",
       ],
       temporaryRoot,
     );
@@ -367,6 +394,16 @@ async function main(): Promise<void> {
     await run(
       "npm",
       ["run", "typecheck", "--workspace=@getpaseo/server"],
+      temporaryRoot,
+    );
+    await run(
+      "npm",
+      ["run", "typecheck", "--workspace=@getpaseo/client"],
+      temporaryRoot,
+    );
+    await run(
+      "npm",
+      ["run", "typecheck", "--workspace=@getpaseo/app"],
       temporaryRoot,
     );
     await run(

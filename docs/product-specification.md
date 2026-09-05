@@ -29,7 +29,8 @@
 次は初版の対象外である。
 
 - ACP client/server機能
-- ZCode iconの既存GLM Agent iconへの対応付け以外のrenderer変更、または新しいUI component
+- ZCode iconの対応付け、新規draftのmode受け渡し、使用量取得の接続以外のrenderer変更、または新しいUI component
+- Team Planの組織・プロジェクト選択、使用していない接続先のクオータ一覧
 - Linux、Windows、macOS x64
 - 複数Paseo versionまたは複数ZCode versionの同時サポート
 - ZCodeのinstall、update、login、logout、credential管理
@@ -120,6 +121,15 @@ providerは同じnative requestに含まれる`input.plan`、request ID、option
 - `getDiagnostic()`は失敗理由、検出version、host artifact/protocol、CLI integrity、runtime smokeを返す。
 - credential、header、environment値、prompt/tool本文は診断へ含めない。
 
+### FR-7: コンテキスト使用量とクオータ
+
+- 公式snapshotの`runtime.contextUsage.used / size`を既存メーターへ渡し、累積トークン数で代用しない。
+- 新規・再開時とモデル応答完了・圧縮・モデル変更時に現在値を反映する。取得前の0%を捏造しない。
+- 対象セッションの現在モデルから接続先を解決し、公式hostの`getEntitlementSnapshot`で個人契約のクオータを取得する。
+- 接続先名・プラン・使用率・残量・リセット時刻を既存カードへ表示する。未対応・取得失敗を明示し、会話を失敗させない。
+- Coding Planは5時間・週間・月間ツールの順に割合を表示し、月間ツールの残量行は省略する。ストックされたリセット権は期限切れを除いた枠別の回数と最短期限（UTC）を表示する。
+- 5分のキャッシュはセッション・モデル・接続先を区別し、モデル変更前の遅延応答を現在の表示に混ぜない。
+
 ## 5. 非機能要件
 
 - 同じ入力から同じASARを生成できること。
@@ -127,7 +137,7 @@ providerは同じnative requestに含まれる`input.plan`、request ID、option
 - unsupported artifactを推測やfallbackで起動しないこと。
 - providerのstdout/stderrとPaseo daemonのprotocol/logを混在させないこと。
 - shutdownでsubscription、pending interaction、child processを解放すること。
-- ZCode icon IDの対応付けを除き、renderer、既存provider、既存ACP経路へ変更を加えないこと。
+- renderer変更はZCode icon ID、新規draftのmode受け渡し、使用量取得の接続に限定する。既存providerの実装と既存ACP経路へ変更を加えないこと。
 
 ## 6. 受け入れ条件
 

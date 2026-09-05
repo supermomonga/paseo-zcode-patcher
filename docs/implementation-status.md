@@ -4,32 +4,32 @@
 
 ## 現在の状態
 
-Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、overlay を実装している。Plan承認後のモード同期に加え、新規作成画面でPlanを選ぶ直前のmodeもnative sessionへ引き継ぐよう修正し、インストール済み`/Applications/PaseoZCode.app`へ反映した。今回の実機・実画面確認は下記の「新規作成画面のPlan直前の選択」に記録している。それ以前の各節は、各修正時点の検証記録である。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
+Paseo 0.7.2 / macOS arm64 と ZCode 3.11.2 の固定された組合せに対する patcher、Paseo source patch、ZCode provider、overlay を実装している。コンテキスト使用量と使用中の接続先の個人契約クオータを既存メーターへ接続し、インストール済み`/Applications/PaseoZCode.app`へ反映した。今回の実機・実画面確認は下記の「コンテキスト使用量とクオータ表示」に記録している。それ以前の各節は、各修正時点の検証記録である。repository に Paseo/ZCode のアプリ本体や資格情報は含まない。
 
 | Area | Status | 証拠 |
 | --- | --- | --- |
-| Architecture/ADR | complete | ADR 0002–0012 は Accepted、`adrs doctor` は error 0 |
+| Architecture/ADR | complete | ADR 0002–0014 は Accepted、`adrs doctor` は error 0 |
 | Patcher CLI | complete | `patch` 以外を拒否し、固定 path、preflight、process 検出、cleanup をテスト |
 | ASAR patcher | complete | header 保持、entry hash、marker、整合性情報、決定性を fixture で検証 |
 | Paseo source patch | complete | 固定 commit に whitespace error なしで適用し、protocol/server の型検査、build、provider icon focused test に成功 |
 | ZCode runtime discovery | complete | app/CLI/host/RPC の version、hash、export、path を実機と自動テストで検証 |
 | Host bridge | complete | method allowlist、schema、request 相関、上限、timeout、終了処理を実装 |
 | Provider/session mapper | complete | catalog、stream、履歴、permission、question、plan、todo、cancel を実装 |
-| Overlay/manifest | complete | ASAR 19 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
-| Provider runtime evidence | verified | 今回の実機hostで新規Plan開始の復帰先3種と履歴なしの計4例を検証し、native/provider値の一致と同じturnでのファイル作成を確認 |
+| Overlay/manifest | complete | ASAR 25 entry、renderer resource 1 entryと生成hashをmanifestに固定 |
+| Provider runtime evidence | verified | 今回の実機hostでコンテキスト現在値・再開後の値・個人契約クオータの一致を確認 |
 | macOS app/signing | verified | 今回の`/Applications/PaseoZCode.app`でmanifest hash一致、元Paseo ASAR不変、strict署名を確認。3回の独立cold startは過去の検証 |
-| UI integration | verified | 今回の実画面で初回送信前の`Full access → Plan`と初期Planの2例を検証。Approve後の表示はそれぞれFull accessとAsk before changes |
+| UI integration | verified | 今回の実画面で円アイコン・コンテキスト・契約名・クオータを確認し、ZCode公式の個人契約表示と照合 |
 
 ## 固定された成果物
 
 | 項目 | 値 |
 | --- | --- |
 | package | `paseo-zcode-patcher@0.1.0`、`private: true` |
-| ASAR overlay entry 数 | 19 |
+| ASAR overlay entry 数 | 25 |
 | renderer resource entry 数 | 1 |
-| renderer resource SHA-256 | `c1b30ac6f0f12f363145b721bbc3b5e3f680a25f38d95d46abe7b77f461e715e` |
-| overlay SHA-256 | `f12dff31dff52579919cc84e92779613e4b17eed12e68cada8705fb3c1697b31` |
-| 生成後 `app.asar` SHA-256 | `dc5b4045d65aef875d0e3fec07a7fd4ca118bb64b6e096c9c83cc8df108f77a5` |
+| renderer resource SHA-256 | `de8cd924588d4e832e28f4f0c1665ecc12f0f3ef4d1c87e26cab079ef62e6ce6` |
+| overlay SHA-256 | `993e60d333cb2508d0a363a917e74cd6f178d1b02e14c96f5dd577da3bbff975` |
+| 生成後 `app.asar` SHA-256 | `1f514af59386440db3de145d0d9c444a9f1dd1221302261676eb02056cafd485` |
 | 元 `app.asar` SHA-256 | `67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b` |
 | ZCode host index SHA-256 | `30911a90dadc5c384959d00d95ccc70c8cf38c74a9cb99c3168b0897d046d215` |
 | ZCode RPC module SHA-256 | `e66203598b60d8728260ad7631f295f9d6deb8276b06e8f0cab8776773c75b31` |
@@ -125,6 +125,48 @@ app全体の型検査には既存の`draggable-list.native.tsx:122`の`dragGestu
 
 最終成果物を`/Applications/PaseoZCode.app`へ反映し、ASAR・rendererのmanifest hash一致、元Paseo ASAR不変、strict署名を確認した。実画面で新規作成時に`Full access → Plan mode`を選び初回送信すると、Approve直後に`Full access`へ戻り、追加promptなしで`draft-yolo.txt`（内容`OK`）を作成して完了した。さらに別の新規作成画面を最初からPlanで開き、modeを変更せず送信すると、Approve直後の表示は`Ask before changes`になった。ファイル作成の通常確認をAllow onceで許可すると、追加promptなしで`draft-initial-plan.txt`（内容`OK`）を作成して完了した。両方の表示を画像とaccessibility treeで確認した。
 
+### コンテキスト使用量とクオータ表示
+
+`runtime.contextUsage.used / size`をコンテキスト現在値として使用し、新規・再開時のsnapshotとモデル応答完了・圧縮・モデル変更・ターン終了後の再取得から通知する。重複readをまとめ、数値が変わらなければ再通知しない。会話全体の累積usageとは分離する。
+
+クオータ取得には任意の`agentId`をprotocol/client/serverへ通し、対象セッションの現在モデルから接続先を解決する。公式hostの`usage-stats.getEntitlementSnapshot`だけを許可し、`requirePreferredProvider: true`、`allowEnvApiKey: false`で別接続先への代替を禁止する。個人契約だけを対象とし、Coding Planの使用率0〜100とStart Planの残量比率0〜1を区別する。資格情報の取得・認証通信は公式hostが行う。
+
+固定sourceの対象testは477件（17 fileの351件とapp 2 fileの126件）成功した。新規・再開・複数turn・圧縮・モデル変更、同一readの共有、累積値との分離、接続先別キャッシュ、5分の期限、モデル変更と遅延応答の競合、未契約・未対応・不正応答・取得失敗を検証した。共通client/serverの既存取得経路と非ZCodeの共有queryも成功している。
+
+protocol/client/server/appの型検査、build、対象sourceの整形確認、renderer exportが成功した。以前app型検査で報告していた`dragGestureHostPresented`のTS2322は、`npm ci --ignore-scripts`で公式postinstallの依存パッチを適用していなかったことが原因だった。overlay生成で公式postinstallを実行し、既存の型エラーも解消した。変更対象sourceのlintは変更前後とも25 errorで、ファイルとruleの組合せ・件数は同一、新規errorは0。新設usage/UI hookファイルのlintは0 error。既存lint違反は今回修正していない。
+
+patcherの通常testは20件成功・実機opt-in testは1件skip、型検査・build・整形確認も成功した。固定sourceへpatchを再適用した53 fileが実装sourceとbyte単位で一致した。overlayは25 ASAR entryと1 renderer resourceを含み、同じoverlayから生成したASARのhashは2回とも一致した。manifestとartifact testを更新し、`npm pack --dry-run`で全entryの包含も確認した。
+
+2026-09-05 22:31 JST、最終overlayのproviderをZCode 3.11.2公式hostへ接続し、`builtin:zai-coding-plan` / `GLM-5.3`で検証した。新規sessionの短い応答後はコンテキスト`15611 / 1000000`、累積usageはinput `15828`・cached `192`・output `30`であり、混同されていない。同じnative sessionを再開して最初の購読でも`15611 / 1000000`を確認した。
+
+クオータは接続先`Z.ai - Coding Plan`、プラン`GLM Coding Max`で、独立に取得した公式snapshotと次の値が一致した。リセット日時は公式ミリ秒値をUTCのISO日時へ変換し、ここではJSTで記録する。
+
+| 項目 | Paseo使用率 | 公式残量率 | 公式リセット日時（JST） |
+| --- | --- | --- | --- |
+| 5時間 | 1% | 99% | 2026-09-06 01:27:40 |
+| 週間 | 22% | 78% | 2026-09-11 00:41:15 |
+| 月間ツール | 2% | 98% | 2026-09-20 00:41:15 |
+
+月間ツールの残量は3896。公式画面の割合は丸められた値で、3896/4000から再計算して置き換えていない。
+
+最終アプリを`/Applications/PaseoZCode.app`へ生成・署名し、元アプリ不変とmanifestのhashを検証した。関連processは自動終了していない。22:40〜22:47 JST、既存の検証workspace`/private/tmp/zcode-mode-ui-check`に別の検証用ZCode sessionを作成し、マイク左の円アイコンとホバー表示を画像・accessibility treeで確認した。複数モデル応答後は`3%使用・28k / 1mトークン`、上記の契約名・クオータ・残量が表示され、画面再読み込み後も復元された。22:45 JSTのZCode公式アプリ`Usage stats → Individual Plan`でも残量率99%・78%・98%と同じリセット日時を確認した。既存ユーザーsessionへのprompt送信は行っていない。
+
+実機契約で照合したのはZ.ai Coding Planである。Start Plan、不正応答、別接続先の同時利用、圧縮後の減少は公式コードに基づく対象testで検証した。アプリを終了・再起動するUI検証は今回行っておらず、native session再開と画面再読み込みをそれぞれ検証した。取得前は既存の未取得リング、未対応・エラーは既存カードのメッセージ表示を使う。
+
+設計判断はAcceptedの[ADR 0013](adr/0013-セッションの使用量を公式hostから取得して既存メーターへ渡す.md)に記録した。ADR 0008・0012を部分改訂し、資格情報境界のADR 0006を関連付け、目次を再生成した。`adrs doctor`は0 errorで、ADR 0001の既存warning/infoだけが残る。
+
+### リセット残数・期限とクオータ表示順
+
+公式hostの`getEntitlementSnapshot`にはリセット権が含まれないため、同じ`usage-stats`の読み取りAPI `getCodingPlanResetStatus`を追加した。現在のCoding Plan接続先を指定し、公式hostの厳密な接続先解決と資格情報取得を使用する。5時間・週間の各配列から期限切れを除外し、残数と最短期限（UTC）を既存カードへ表示する。取得失敗時は通常クオータを保持し、リセット情報だけ取得失敗として表示する。消費・請求・履歴既読化のAPIは許可していない。
+
+Coding Planのクオータは5時間・週間・月間ツールの順に固定し、月間ツールの残量行を削除した。Start Planの残量は引き続き表示する。rendererは前回と同一で、providerから渡す既存`windows`と`details`だけを変更している。
+
+2026-09-05 22:57 JSTの実機hostは`availableFiveHourResets: []`、`availableWeekResets: [{ expireAt: 1790870399000 }]`を返した。変換後の表示は「週間リセット 1回」「最短期限 (UTC) 2026-10-01 15:59」。これはJSTの2026-10-02 00:59に相当し、公式画面の「1 reset available」「Expires in 26d 2h」と整合する。リセット権の消費は行っていない。
+
+対象testは482件（356件＋app 126件）成功。今回変更した5 source fileのlintは0 error・0 warning、protocol/client/server/app型検査と整形確認、固定sourceからのoverlay再生成が成功した。patcherも20 test成功・実機opt-in test 1件skip、型検査・整形確認が成功している。元と同じrenderer hash、25 ASAR entry、1 renderer resourceを維持する。ADR 0014をAcceptedとしてADR 0013を部分改訂し、目次を再生成した。`adrs doctor`は0 error、既存ADR 0001のwarning/infoのみ。
+
+アプリへの反映は、起動中の関連processをパッチャーが検出したため停止した。関連アプリの終了後に再実行し、画面を確認する必要がある。現在のmanifestは新しい生成物を表し、インストール済みアプリは更新待ちである。
+
 ## 配布上の制約
 
 参照した `paseo-acp-patcher` と `zcode-acp` の固定 commit には配布ライセンスの宣言がなかった。権利関係を確認するまで package は公開せず、`private: true` を維持する。Paseo の Apache-2.0 notice と production dependency の license は `NOTICE` と `LICENSES/` に記録している。
@@ -133,7 +175,7 @@ app全体の型検査には既存の`draggable-list.native.tsx:122`の`dragGestu
 
 ## 変更禁止範囲
 
-- ZCode icon IDの対応付けと新規draftのmode受け渡し以外のPaseo renderer、および既存interaction UI component
+- ZCode icon IDの対応付け、新規draftのmode受け渡し、セッション単位の使用量取得の接続以外のPaseo renderer、および既存interaction UI component
 - 既存 Paseo provider と ACP 経路
 - `zcode-acp` repository の公開 API または build
 - 元 Paseo/ZCode install artifact

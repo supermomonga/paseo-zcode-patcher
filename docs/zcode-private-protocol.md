@@ -105,6 +105,12 @@ respondProviderRuntimeHeaders
 disposeWorkspace
 ```
 
+アカウント使用量は`usage-stats`チャンネルの`getEntitlementSnapshot`を公開する。現在モデルの`providerId`を`preferredProviderId`として渡し、`requirePreferredProvider: true`、`allowEnvApiKey: false`、`includeSubscription: true`を指定する。リセット状態の読み取りは同チャンネルの`getCodingPlanResetStatus`へ現在のCoding Plan接続先を指定する。リセットの消費・請求・履歴既読化、購入、credential操作はbridgeへ公開しない。
+
+公式rendererの`kF` / `tzt`はCoding Planの`percentage`を使用率0〜100として扱う。一方、hostの`cde`とrendererの`rot`はStart Planの`percentage`を残量比率0〜1として扱う。両者を同じ変換にしない。`nextResetTime`はミリ秒単位である。`unit` / `number`はCoding Planでは時間窓の識別にも使われるため、一律にクオータの総量と解釈しない。
+
+`getCodingPlanResetStatus`は`availableFiveHourResets`と`availableWeekResets`の各要素にミリ秒の`expireAt`を返す。公式hostの`resolveCodingPlanResetAuthorization`は接続先を厳密に指定し、ZCodeと契約先のJWTを自身で読む。公式rendererの`vWe`と同様に期限切れを除き、枠ごとの残数と最短期限を表示する。履歴フィールドは表示にも認証にも不要なため取得schemaに含めない。
+
 subscriptionは`onDynamicSessionEvent`だけを使用し、内部bridgeでは専用のsubscribe/unsubscribe operationとして扱う。
 
 ## 6. Session data
@@ -121,7 +127,7 @@ subscriptionは`onDynamicSessionEvent`だけを使用し、内部bridgeでは専
 
 - session: ID、status、workspace、title、updatedAt
 - messages: user/assistant part、reasoning、file、tool
-- runtime: context usageとcost
+- runtime: `contextUsage.used / size`が現在のコンテキスト使用量と上限。`getTaskTokenUsage`は会話全体の累積値なので代用しない。costは別情報。
 - todos: content、`pending | in_progress | completed`、priority
 - slash commands
 
@@ -200,3 +206,7 @@ headless providerはZCode desktop browser backendを持たない。公式hostか
 Paseoは送信時に作成する構造を維持し、draft内の非PlanからPlanへの選択を初期化引数へ引き継いで同じnative遷移を作る。承認後の復帰先を別のロジックで推測しない。
 
 実機の`setMode`返却snapshotでは、`settings.model.available`が現在modelだけに縮小することを確認した。新規sessionの完全なmodel catalogを使ってmodel・Thinkingを先に設定し、その後にdraftの非Plan→Planのmode遷移を適用する。初期モデルの選択前にmodeを変更しない。
+
+## コンテキストの更新通知
+
+公式CLIの`C6i`は`ModelComplete`と`CompactBoundary`を`session.updated`へ変換する。payloadの`usage`、`postCompactTokenCount`、`truePostCompactTokenCount`、`compactBoundary`、`modelRef`を契機に`readSession({ runtimePolicy: "existing-only" })`で公式snapshotを読む。mode通知の処理は維持する。`state.updated`のmodel変更、snapshot受信、ターン終了でも現在値を反映する。snapshotから同じ値を受け取った場合はコンテキスト通知を重複させない。

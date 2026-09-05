@@ -67,7 +67,7 @@ marker pathは`paseo-zcode-patcher.json`とし、次を含める。
   "paseoVersion": "0.7.2",
   "paseoSourceCommit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
   "originalAsarSha256": "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
-  "overlaySha256": "f12dff31dff52579919cc84e92779613e4b17eed12e68cada8705fb3c1697b31",
+  "overlaySha256": "993e60d333cb2508d0a363a917e74cd6f178d1b02e14c96f5dd577da3bbff975",
   "zcodeArtifact": "zcode-host-3.11.2",
   "zcodeProtocol": "zcode-task-v1",
   "zcodeAcpReferenceCommit": "7b3af187d7ee732e9043aed873a863fc855625c2",
@@ -85,11 +85,12 @@ markerはtimestampやmachine固有pathを含まず、上記の固定値から決
 - server provider registryへZCode client factoryとcontractを追加
 - Node互換のZCode discovery、host bridge、schema、session、mapperを追加
 - rendererの`zcode` icon IDを既存の`glm-acp-agent` catalog iconへ対応付け
+- protocol/client/serverへ任意のagentIdによる使用量取得を追加し、既存メーターから対象セッションへ接続
 - focused testと必要なpackage dependencyを追加
 
-renderer変更はZCode icon IDの対応付けと新規draftのPlan直前のmode受け渡しに限定する。既存provider、既存ACP client、既存SDKは変更しない。新しい画像assetやZCode専用componentは追加しない。
+renderer変更はZCode icon IDの対応付け、新規draftのPlan直前のmode受け渡し、既存コンテキストメーターへのセッション単位のクオータ取得の接続に限定する。既存providerと既存ACP clientの実装は変更しない。共通clientの使用量取得には任意のagentIdを追加する。新しい画像assetやZCode専用componentは追加しない。
 
-`scripts/build-overlay.ts`は指定Paseo checkoutが固定commitでcleanであることを確認し、`git archive`で一時directoryへ展開する。そこでsource patch適用、frozen install、protocol/server/provider/icon/form focused testとアプリ専用設定でのdraft保存test、typecheck、server build、Electron向けrenderer exportを行い、overlayとmanifestを生成する。renderer exportはmain bundleと参照用`index.html`以外が元アプリと同一であることを検証し、main bundleだけを元と同じ固定pathへ置換するresource entryとして保存する。指定checkoutのworking treeは変更しない。
+`scripts/build-overlay.ts`は指定Paseo checkoutが固定commitでcleanであることを確認し、`git archive`で一時directoryへ展開する。そこでsource patch適用、frozen install、公式postinstallによる依存パッチ適用、protocol/server/provider/icon/form focused testとアプリ専用設定でのdraft保存test、typecheck、server build、Electron向けrenderer exportを行い、overlayとmanifestを生成する。renderer exportはmain bundleと参照用`index.html`以外が元アプリと同一であることを検証し、main bundleだけを元と同じ固定pathへ置換するresource entryとして保存する。指定checkoutのworking treeは変更しない。
 
 ZCode接続実装は`zcode-acp`参照commitの意味論をNode.jsへ移植する。Bun API、ACP server、ACP型、ACP fallbackをoverlayへ含めない。
 
@@ -130,4 +131,4 @@ patcherは次を行わない。
 
 初版releaseはnpm package/CLI sourceとversion固定overlay/manifestを含む。overlayには固定Paseo sourceから生成したmain renderer bundle 1 fileを含むが、PaseoまたはZCodeの完全なアプリ本体は含めない。release前にlockfile、checksums、dependency license一覧を検証する。生成済み`PaseoZCode.app`自体は配布しない。
 
-通常の`node_modules/`はrepositoryで追跡しないが、`artifacts/*/overlay/node_modules/`はASARへ適用するversion固定成果物なので例外として追跡する。クリーンなcheckoutから`npm pack --dry-run`を実行し、manifestが参照するASAR 19 entryとrenderer resource 1 entryがpackageへ含まれることを確認する。
+通常の`node_modules/`はrepositoryで追跡しないが、`artifacts/*/overlay/node_modules/`はASARへ適用するversion固定成果物なので例外として追跡する。クリーンなcheckoutから`npm pack --dry-run`を実行し、manifestが参照するASAR 25 entryとrenderer resource 1 entryがpackageへ含まれることを確認する。

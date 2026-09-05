@@ -10,6 +10,8 @@ links:
   kind: relatesto
 - target: 10
   kind: relatesto
+- target: 13
+  kind: RelatesTo
 ---
 
 # ネイティブinteractionとcredentialの境界を保持する

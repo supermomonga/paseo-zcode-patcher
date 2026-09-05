@@ -10,6 +10,8 @@ links:
   kind: amends
 - target: 11
   kind: amends
+- target: 13
+  kind: amendedby
 ---
 
 # 新規セッションのPlan直前の選択をZCodeへ引き継ぐ

@@ -2,7 +2,7 @@
 
 最終更新: 2026-09-05
 
-この文書は、Paseo 0.7.2の`AgentClient` / `AgentSession`へZCode 3.11.2を直接接続する公開・内部contractを定義する。interaction用renderer contractは変更せず、provider icon IDだけを既存catalogへ対応付ける。
+この文書は、Paseo 0.7.2の`AgentClient` / `AgentSession`へZCode 3.11.2を直接接続する公開・内部contractを定義する。interaction用renderer contractは変更せず、provider icon IDを既存catalogへ対応付け、コンテキストとクオータを既存メーターへ渡す。
 
 ## 1. Provider definition
 
@@ -220,3 +220,15 @@ snapshotのtodoは順序を保持し、`content`、`status`、`priority`をPaseo
 - 新planが届いても別requestを暗黙にdismissしない。ZCodeのrequest IDごとに独立して処理する。
 - terminal event、interrupt、session close、bridge exitでは全pending requestをdeny/cancelし、UIへ`permission_resolved`を通知する。
 - resolved requestへのlate UI responseはnativeへ送らず明示的なnot-found errorとする。
+
+## コンテキストとアカウント使用量
+
+`runtime.contextUsage.used / size`を`AgentUsage.contextWindowUsedTokens / contextWindowMaxTokens`へ写像する。初期snapshotと再開snapshotを購読開始時にも通知する。値がない場合は未取得として扱い、累積トークン数や架空のゼロで埋めない。現在値はモデル完了・圧縮・モデル変更・ターン終了で更新する。
+
+`provider.usage.list.request`と`DaemonClient.listProviderUsage`に任意の`agentId`を追加する。指定時はサーバーが対象sessionの任意メソッド`getProviderUsage()`を呼ぶ。対応メソッドがない既存providerと、agentIdなしの一覧は既存のProviderUsageServiceを使う。ZCodeの未対応接続先や取得失敗は明示的な`ProviderUsage`を返し、他のアカウントの一覧へ代替しない。
+
+クオータは現在モデルの接続先だけを対象とし、個人契約のZ.ai／BigModel（Coding Plan、Start Plan、公式hostが利用できるAPI接続先）に対応する。Team Planと任意の第三者接続先は未対応。取得結果は`providerId: "zcode"`にまとめ、接続先名・プラン・時間窓ごとの割合・リセット時刻を共通カードへ渡す。Coding Planは5時間・週間・月間ツールの順に表示し、月間ツールの残量行は省略する。Start Planの残量表示は保持する。
+
+フロントエンドはセッション・モデルをquery keyに含め、host側はセッションごとに接続先を識別して5分間キャッシュする。同一接続先の進行中の取得を共有し、別接続先の遅延応答で現在のキャッシュを上書きしない。nativeエラー詳細はクライアントへ渡さず、クオータ失敗で進行中のturnを失敗させない。根拠は[ADR 0013](adr/0013-セッションの使用量を公式hostから取得して既存メーターへ渡す.md)。
+
+Coding Planのリセット権は公式`getCodingPlanResetStatus`を同じ接続先で読み、期限切れを除いた枠別の回数と最短期限（UTC）を詳細行へ渡す。ゼロ件と取得失敗を区別し、読み取り失敗でも通常クオータは保持する。リセットを消費するメソッドは公開しない。[ADR 0014](adr/0014-公式hostからリセット権の残数と期限を読み取る.md)を参照する。

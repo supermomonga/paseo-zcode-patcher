@@ -195,6 +195,18 @@ macOS arm64、公式Paseo 0.7.2、公式ZCode 3.11.2、一時workspaceと隔離�
 
 最終アプリの実画面でも、初回送信前のFull access→Planから承認後Full accessへ戻り、ファイル作成まで完了した。別の新規画面を初期Planのまま開始した場合は、前のFull accessを引き継がずAsk before changesへ戻り、通常のファイル変更確認を一度許可して実装が完了した。ASAR/renderer hash、元Paseo ASAR不変、strict署名とpackageへの全20 overlay entryの包含を確認した。詳細と既存型errorは[実装状況](implementation-status.md#新規作成画面のplan直前の選択)を参照する。
 
+### コンテキスト使用量とクオータ表示
+
+固定sourceの対象477 test、protocol/client/server/app型検査、build、source整形確認、renderer exportに成功した。patcherは20 test成功・実機opt-in test 1件skip、型検査・build・整形確認も成功。sourceのlintは修正前後で同じ25 error、新規errorは0だった。公式postinstallによる依存パッチを適用し、以前記録したapp型検査のTS2322も解消した。
+
+対象testは新規・再開・複数turn・圧縮・モデル変更時の現在コンテキスト、累積usageとの分離、snapshot読み取りの共有、接続先別クオータ、モデル変更と取得完了の競合、5分のキャッシュ期限、未契約・失敗・不正レスポンス、既存providerの取得経路を検証する。固定sourceへの再適用結果53 fileと実装sourceのbyte一致、25 ASAR entryと1 renderer resourceのpackage包含、ASAR生成の決定性、manifest hashも確認した。
+
+実機hostではコンテキスト`15611 / 1000000`とnative session再開時の復元を確認した。生成アプリでは円アイコン、ホバー、画面再読み込み後の復元を確認し、同一接続先のZCode公式`Individual Plan`画面と割合・リセット日時を照合した。Coding Plan以外の契約や別接続先同時利用などは対象testによる確認であり、実機アカウントを追加していない。詳細と実測表は[実装状況](implementation-status.md#コンテキスト使用量とクオータ表示)を参照する。
+
+### リセット残数・期限と表示順
+
+公式hostの読み取りAPIで、期限切れを除く5時間枠・週間枠の残数と最短期限を検証した。複数期限・ゼロ件・不正応答・取得失敗・Start Planでの非取得と、5時間→週間→月間ツールの順序・月間ツール残量の非表示を対象testへ追加した。対象482 testと4 packageの型検査が成功し、今回変更したsourceのlintは0 errorだった。実機の週間リセット1回と期限を公式応答で照合した。アプリ更新状況は[実装状況](implementation-status.md#リセット残数期限とクオータ表示順)を参照する。
+
 ## 8. Release判定
 
 release可能なのは次をすべて満たす場合だけである。
@@ -213,7 +225,7 @@ release可能なのは次をすべて満たす場合だけである。
 
 1. source commitと公式ASARを特定する。
 2. provider protocol/types/UI contractに変更がないか確認する。
-3. source patchを新commitへ移植し、ZCode icon mappingと新規draftのmode受け渡し以外のrenderer差分がないことを再確認する。
+3. source patchを新commitへ移植し、ZCode icon mapping、新規draftのmode受け渡し、セッション単位の使用量取得の接続以外のrenderer差分がないことを再確認する。
 4. 元renderer bundle path/hashを含むoverlay/manifest/hashを置換する。
 5. 全testと実機検証を完走する。
 6. 旧Paseo entry、fixture、support記述を削除する。

@@ -21,7 +21,7 @@ describe("release artifact", () => {
       sourceAsarSha256:
         "67818f9ed4f246484ef5cdc82a59f7be3d3587215c1c8b1d5049a2052b390f9b",
       patchedAsarSha256:
-        "dc5b4045d65aef875d0e3fec07a7fd4ca118bb64b6e096c9c83cc8df108f77a5",
+        "1f514af59386440db3de145d0d9c444a9f1dd1221302261676eb02056cafd485",
     });
     expect(manifest.zcode).toMatchObject({
       appVersion: "3.11.2",
@@ -30,10 +30,22 @@ describe("release artifact", () => {
       protocol: "zcode-task-v1",
       requiredExports: ["g", "i", "j"],
     });
-    expect(manifest.entries).toHaveLength(19);
+    expect(manifest.entries).toHaveLength(25);
     expect(manifest.overlayHash).toBe(
-      "f12dff31dff52579919cc84e92779613e4b17eed12e68cada8705fb3c1697b31",
+      "993e60d333cb2508d0a363a917e74cd6f178d1b02e14c96f5dd577da3bbff975",
     );
+    for (const suffix of [
+      "protocol/dist/messages.js",
+      "client/dist/daemon-client.js",
+      "server/agent/agent-manager.js",
+      "server/session.js",
+      "server/session/provider/provider-catalog-session.js",
+      "providers/zcode/usage.js",
+    ]) {
+      expect(
+        manifest.entries.some((entry) => entry.path.endsWith(suffix)),
+      ).toBe(true);
+    }
     expect(
       manifest.entries.some((entry) =>
         /(?:renderer|\.test\.js$|\.map$|agentclientprotocol|acp-agent)/u.test(
@@ -47,7 +59,7 @@ describe("release artifact", () => {
         source:
           "resources/app-dist/_expo/static/js/web/index-a14e171f25e905c272fe59b4f86aca06.js",
         sha256:
-          "c1b30ac6f0f12f363145b721bbc3b5e3f680a25f38d95d46abe7b77f461e715e",
+          "de8cd924588d4e832e28f4f0c1665ecc12f0f3ef4d1c87e26cab079ef62e6ce6",
         originalSha256:
           "e0bf84a5218b90f1575ead487f4cce8d20f06027eb76df1a9efdef9283c2cdc8",
       },
