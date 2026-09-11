@@ -1,5 +1,8 @@
 # paseo-zcode-patcher
 
+> [!IMPORTANT]
+> This project is no longer maintained and will be archived. Paseo now has built-in plugin support, and providers can be added through plugins. Use [paseo-plugin-zcode-provider](https://github.com/supermomonga/paseo-plugin-zcode-provider) instead.
+
 Creates a local macOS arm64 app copy of Paseo 0.7.2 with a built-in provider for ZCode 3.11.2.
 
 > [!NOTE]
